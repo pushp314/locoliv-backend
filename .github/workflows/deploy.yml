@@ -1,0 +1,86 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  GO_VERSION: '1.22'
+  DOCKER_IMAGE: locolive-backend
+
+jobs:
+  # ===== TEST & BUILD =====
+  test:
+    name: Test & Build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test -v -race ./...
+
+      - name: Build binary
+        run: go build -o bin/api ./cmd/api
+
+      - name: Build Docker image
+        run: docker build -t ${{ env.DOCKER_IMAGE }}:${{ github.sha }} .
+
+  # ===== DEPLOY TO EC2 =====
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /opt/locolive
+            
+            # Pull latest code
+            git pull origin main
+            
+            # Build and restart
+            docker-compose -f deploy/docker-compose.prod.yml build api
+            docker-compose -f deploy/docker-compose.prod.yml up -d api
+            
+            # Run migrations
+            docker-compose -f deploy/docker-compose.prod.yml --profile migrate run --rm migrate || true
+            
+            # Health check
+            sleep 5
+            curl -f http://localhost:8080/health || exit 1
+            
+            echo "✅ Deployment successful!"
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "❌ Deployment failed!"

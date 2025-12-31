@@ -12,7 +12,7 @@ services:
     environment:
       - PORT=8080
       - ENV=production
-      - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_URL=postgres://${DB_USER:-locolive}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-locolive}?sslmode=disable
       - REDIS_URL=redis://redis:6379
       - JWT_SECRET=${JWT_SECRET}
       - JWT_ACCESS_EXPIRY=${JWT_ACCESS_EXPIRY:-15m}
