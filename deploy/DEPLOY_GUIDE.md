@@ -1,5 +1,13 @@
-# 🚀 Complete AWS EC2 Deployment Guide
+# 🚀 Complete AWS EC2 Deployment Guide (No Docker)
 ## LocoLive Backend → launchit.co.in
+
+**Native Deployment using:**
+- Go binary (compiled)
+- PostgreSQL (native)
+- Redis (native)
+- Nginx (reverse proxy)
+- systemd (process manager)
+- Let's Encrypt SSL
 
 **Your Setup:**
 - Domain: `launchit.co.in`
@@ -15,20 +23,21 @@
 3. [Point Domain to EC2](#step-3-point-domain-to-ec2)
 4. [SSH into EC2](#step-4-ssh-into-ec2)
 5. [Update System Packages](#step-5-update-system-packages)
-6. [Install Docker](#step-6-install-docker)
-7. [Install Docker Compose](#step-7-install-docker-compose)
-8. [Install Nginx](#step-8-install-nginx)
-9. [Install Git](#step-9-install-git)
-10. [Clone Repository](#step-10-clone-repository)
-11. [Configure Environment](#step-11-configure-environment)
-12. [Start Database & Redis](#step-12-start-database--redis)
-13. [Run Migrations](#step-13-run-migrations)
-14. [Start the API](#step-14-start-the-api)
-15. [Configure Nginx](#step-15-configure-nginx)
-16. [Install SSL Certificate](#step-16-install-ssl-certificate)
-17. [Setup Auto-Start](#step-17-setup-auto-start)
-18. [Configure GitHub CI/CD](#step-18-configure-github-cicd)
-19. [Verify Deployment](#step-19-verify-deployment)
+6. [Install Go](#step-6-install-go)
+7. [Install PostgreSQL](#step-7-install-postgresql)
+8. [Install Redis](#step-8-install-redis)
+9. [Install Nginx](#step-9-install-nginx)
+10. [Install Migrate Tool](#step-10-install-migrate-tool)
+11. [Clone Repository](#step-11-clone-repository)
+12. [Configure Environment](#step-12-configure-environment)
+13. [Setup Database](#step-13-setup-database)
+14. [Run Migrations](#step-14-run-migrations)
+15. [Build the Application](#step-15-build-the-application)
+16. [Setup systemd Service](#step-16-setup-systemd-service)
+17. [Configure Nginx](#step-17-configure-nginx)
+18. [Install SSL Certificate](#step-18-install-ssl-certificate)
+19. [Configure GitHub CI/CD](#step-19-configure-github-cicd)
+20. [Verify Deployment](#step-20-verify-deployment)
 
 ---
 
@@ -42,15 +51,15 @@
    ```
    Name:           locolive-backend
    AMI:            Ubuntu Server 22.04 LTS (HVM), SSD Volume Type
-   Architecture:   64-bit (Arm) - for t3.micro
+   Architecture:   64-bit (x86)
    Instance type:  t3.micro
-   Key pair:       locolive (use your existing locolive.pem)
+   Key pair:       locolive (your existing locolive.pem)
    ```
 
 3. **Network settings** → Click "Edit"
    - Auto-assign public IP: **Enable**
 
-4. **Configure storage**: 20 GB gp3 (default is fine)
+4. **Configure storage**: 20 GB gp3
 
 5. Click **Launch instance**
 
@@ -71,7 +80,6 @@
 | SSH | 22 | My IP | SSH access |
 | HTTP | 80 | 0.0.0.0/0 | Web traffic |
 | HTTPS | 443 | 0.0.0.0/0 | Secure web traffic |
-| Custom TCP | 8080 | 0.0.0.0/0 | API direct (optional) |
 
 4. Click **Save rules**
 
@@ -92,9 +100,8 @@
 
 3. Wait 5-10 minutes for DNS propagation
 
-4. Verify:
+4. Verify (on your Mac):
    ```bash
-   # On your Mac
    nslookup launchit.co.in
    # Should show your EC2 IP
    ```
@@ -109,7 +116,7 @@
 # Navigate to where your key is stored
 cd ~/Downloads  # or wherever locolive.pem is
 
-# Set correct permissions
+# Set correct permissions (only first time)
 chmod 400 locolive.pem
 
 # Connect to EC2
@@ -121,13 +128,13 @@ ssh -i locolive.pem ubuntu@YOUR_EC2_PUBLIC_IP
 
 ✅ You should see: `ubuntu@ip-xxx-xxx-xxx-xxx:~$`
 
+**All following commands are run ON EC2 (after SSH)**
+
 ---
 
 ## STEP 5: Update System Packages
 
 ```bash
-# Run these commands ON EC2
-
 # Update package list
 sudo apt update
 
@@ -135,58 +142,84 @@ sudo apt update
 sudo apt upgrade -y
 
 # Install essential tools
-sudo apt install -y curl wget git unzip
+sudo apt install -y curl wget git unzip build-essential
 ```
 
 ---
 
-## STEP 6: Install Docker
+## STEP 6: Install Go
 
 ```bash
-# Remove old Docker versions (if any)
-sudo apt remove docker docker-engine docker.io containerd runc 2>/dev/null || true
+# Download Go 1.22
+wget https://go.dev/dl/go1.22.5.linux-amd64.tar.gz
 
-# Install Docker using official script
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
+# Remove any existing Go installation
+sudo rm -rf /usr/local/go
 
-# Add your user to docker group (no sudo needed for docker commands)
-sudo usermod -aG docker ubuntu
+# Extract to /usr/local
+sudo tar -C /usr/local -xzf go1.22.5.linux-amd64.tar.gz
 
-# Start Docker and enable on boot
-sudo systemctl start docker
-sudo systemctl enable docker
-
-# IMPORTANT: Apply group changes
-newgrp docker
-
-# Verify Docker installation
-docker --version
-# Expected: Docker version 24.x.x or higher
-
-docker run hello-world
-# Expected: "Hello from Docker!" message
-```
-
----
-
-## STEP 7: Install Docker Compose
-
-```bash
-# Download latest Docker Compose
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-
-# Make it executable
-sudo chmod +x /usr/local/bin/docker-compose
+# Add to PATH (add to .bashrc for persistence)
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc
+source ~/.bashrc
 
 # Verify installation
-docker-compose --version
-# Expected: Docker Compose version v2.x.x
+go version
+# Expected: go version go1.22.5 linux/amd64
+
+# Cleanup
+rm go1.22.5.linux-amd64.tar.gz
 ```
 
 ---
 
-## STEP 8: Install Nginx
+## STEP 7: Install PostgreSQL
+
+```bash
+# Install PostgreSQL 16
+sudo apt install -y postgresql postgresql-contrib
+
+# Start and enable PostgreSQL
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
+
+# Verify it's running
+sudo systemctl status postgresql
+# Should show: active (exited) - this is normal for PostgreSQL
+
+# Verify version
+psql --version
+# Expected: psql (PostgreSQL) 14.x or higher
+```
+
+---
+
+## STEP 8: Install Redis
+
+```bash
+# Install Redis
+sudo apt install -y redis-server
+
+# Configure Redis to start on boot
+sudo sed -i 's/supervised no/supervised systemd/' /etc/redis/redis.conf
+
+# Restart Redis to apply changes
+sudo systemctl restart redis-server
+sudo systemctl enable redis-server
+
+# Verify it's running
+sudo systemctl status redis-server
+# Should show: active (running)
+
+# Test Redis
+redis-cli ping
+# Expected: PONG
+```
+
+---
+
+## STEP 9: Install Nginx
 
 ```bash
 # Install Nginx
@@ -200,31 +233,32 @@ sudo systemctl enable nginx
 sudo systemctl status nginx
 # Should show: active (running)
 
-# Test in browser (temporary)
-# Visit: http://YOUR_EC2_IP or http://launchit.co.in
-# Should show: "Welcome to nginx!"
+# Test in browser: http://YOUR_EC2_IP
+# Should show "Welcome to nginx!" page
 ```
 
 ---
 
-## STEP 9: Install Git
+## STEP 10: Install Migrate Tool
 
 ```bash
-# Git is usually pre-installed, but let's make sure
-sudo apt install -y git
+# Download golang-migrate
+curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz | tar xvz
+
+# Move to system bin
+sudo mv migrate /usr/local/bin/migrate
+
+# Make executable
+sudo chmod +x /usr/local/bin/migrate
 
 # Verify
-git --version
-# Expected: git version 2.x.x
-
-# Configure Git (optional but recommended)
-git config --global user.name "Your Name"
-git config --global user.email "your@email.com"
+migrate --version
+# Expected: 4.17.0
 ```
 
 ---
 
-## STEP 10: Clone Repository
+## STEP 11: Clone Repository
 
 ### First, push your code to GitHub (on your Mac):
 
@@ -239,10 +273,10 @@ git init
 git add .
 
 # Commit
-git commit -m "Initial commit - LocoLive Backend"
+git commit -m "LocoLive Backend - Native deployment"
 
-# Create GitHub repo at https://github.com/new
-# Then add remote and push:
+# Create repo at https://github.com/new (name: locolive-backend)
+# Then:
 git remote add origin https://github.com/YOUR_USERNAME/locolive-backend.git
 git branch -M main
 git push -u origin main
@@ -261,14 +295,14 @@ sudo chown ubuntu:ubuntu /opt/locolive
 cd /opt/locolive
 git clone https://github.com/YOUR_USERNAME/locolive-backend.git .
 
-# Verify files are there
+# Verify files
 ls -la
-# Should see: cmd/, internal/, deploy/, docker-compose.yml, etc.
+# Should see: cmd/, internal/, deploy/, db/, etc.
 ```
 
 ---
 
-## STEP 11: Configure Environment
+## STEP 12: Configure Environment
 
 ```bash
 # On EC2
@@ -277,37 +311,42 @@ cd /opt/locolive
 # Copy production environment template
 cp deploy/.env.production .env
 
-# Generate a secure JWT secret (copy the output)
+# Generate a secure JWT secret
 openssl rand -base64 64
+# COPY THIS OUTPUT!
+
+# Generate a secure database password
+openssl rand -base64 32
+# COPY THIS OUTPUT!
 
 # Edit the environment file
 nano .env
 ```
 
-### Edit `.env` with these values:
+### Update `.env` with your values:
 
 ```env
 # Server
 PORT=8080
 ENV=production
 
-# Database - CHANGE THE PASSWORD!
-DATABASE_URL=postgres://locolive:YOUR_SECURE_PASSWORD_HERE@postgres:5432/locolive?sslmode=disable
-DB_HOST=postgres
+# Database - Use your generated password
+DATABASE_URL=postgres://locolive:YOUR_DB_PASSWORD_HERE@localhost:5432/locolive?sslmode=disable
+DB_HOST=localhost
 DB_PORT=5432
 DB_USER=locolive
-DB_PASSWORD=YOUR_SECURE_PASSWORD_HERE
+DB_PASSWORD=YOUR_DB_PASSWORD_HERE
 DB_NAME=locolive
 
 # Redis
-REDIS_URL=redis://redis:6379
+REDIS_URL=redis://localhost:6379
 
-# JWT - PASTE YOUR GENERATED SECRET HERE!
-JWT_SECRET=PASTE_THE_64_CHAR_SECRET_FROM_OPENSSL_HERE
+# JWT - Paste your generated secret
+JWT_SECRET=YOUR_64_CHAR_SECRET_HERE
 JWT_ACCESS_EXPIRY=15m
 JWT_REFRESH_EXPIRY=168h
 
-# Google OAuth - Use your real credentials
+# Google OAuth
 GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 
@@ -319,143 +358,95 @@ LOG_LEVEL=info
 
 ---
 
-## STEP 12: Start Database & Redis
+## STEP 13: Setup Database
 
 ```bash
-# On EC2
-cd /opt/locolive
+# Switch to postgres user
+sudo -u postgres psql
 
-# Start PostgreSQL and Redis
-docker-compose -f deploy/docker-compose.prod.yml up -d postgres redis
+# Inside PostgreSQL shell, run these commands:
+```
 
-# Wait for them to be healthy (10-15 seconds)
-sleep 15
+```sql
+-- Create user (use same password as in .env)
+CREATE USER locolive WITH PASSWORD 'YOUR_DB_PASSWORD_HERE';
 
-# Verify containers are running
-docker-compose -f deploy/docker-compose.prod.yml ps
+-- Create database
+CREATE DATABASE locolive;
 
-# Expected output:
-# NAME                          STATUS
-# locolive-postgres-1          Up (healthy)
-# locolive-redis-1             Up
+-- Grant privileges
+GRANT ALL PRIVILEGES ON DATABASE locolive TO locolive;
 
-# Test PostgreSQL connection
-docker exec locolive-backend-postgres-1 psql -U locolive -c "SELECT 1;"
-# Expected: shows "1" in a table
+-- Connect to the database
+\c locolive
+
+-- Grant schema privileges
+GRANT ALL ON SCHEMA public TO locolive;
+
+-- Exit
+\q
+```
+
+```bash
+# Test the connection
+psql -h localhost -U locolive -d locolive -c "SELECT 1;"
+# Enter password when prompted
+# Expected: Shows "1" in a table
 ```
 
 ---
 
-## STEP 13: Run Migrations
+## STEP 14: Run Migrations
 
 ```bash
 # On EC2
 cd /opt/locolive
 
-# Run database migrations
-docker-compose -f deploy/docker-compose.prod.yml --profile migrate run --rm migrate
+# Run migrations
+migrate -database "postgres://locolive:YOUR_DB_PASSWORD@localhost:5432/locolive?sslmode=disable" -path db/migrations up
 
 # Expected output:
 # 1/u init_schema (XXms)
 
 # Verify tables were created
-docker exec locolive-backend-postgres-1 psql -U locolive -c "\dt"
-# Should show: users, sessions, refresh_tokens, etc.
+psql -h localhost -U locolive -d locolive -c "\dt"
+# Should show: users, sessions, refresh_tokens, password_reset_tokens, schema_migrations
 ```
 
 ---
 
-## STEP 14: Start the API
+## STEP 15: Build the Application
 
 ```bash
 # On EC2
 cd /opt/locolive
 
-# Build and start the API
-docker-compose -f deploy/docker-compose.prod.yml up -d --build api
+# Download Go dependencies
+go mod download
 
-# Wait for it to start
-sleep 10
+# Build the binary
+go build -ldflags="-w -s" -o bin/api ./cmd/api
 
-# Check it's running
-docker-compose -f deploy/docker-compose.prod.yml ps
+# Make it executable
+chmod +x bin/api
 
-# View logs
-docker-compose -f deploy/docker-compose.prod.yml logs api
+# Test run (Ctrl+C to stop)
+./bin/api
+# Should show: "Server listening" on :8080
 
-# Test the API locally
+# Test in another terminal (or press Ctrl+C first)
 curl http://localhost:8080/health
-# Expected: {"status":"ok","timestamp":"...","version":"1.0.0"}
-```
-
----
-
-## STEP 15: Configure Nginx
-
-```bash
-# On EC2
-
-# Copy Nginx configuration
-sudo cp /opt/locolive/deploy/nginx.conf /etc/nginx/sites-available/locolive
-
-# Enable the site
-sudo ln -sf /etc/nginx/sites-available/locolive /etc/nginx/sites-enabled/
-
-# Remove default site
-sudo rm -f /etc/nginx/sites-enabled/default
-
-# Test Nginx configuration
-sudo nginx -t
-# Expected: "syntax is ok" and "test is successful"
-
-# Reload Nginx
-sudo systemctl reload nginx
-
-# Test through Nginx
-curl http://localhost/health
-# Expected: {"status":"ok"...}
-
-# Test from your domain
-curl http://launchit.co.in/health
 # Expected: {"status":"ok"...}
 ```
 
 ---
 
-## STEP 16: Install SSL Certificate
+## STEP 16: Setup systemd Service
 
 ```bash
 # On EC2
 
-# Install Certbot
-sudo apt install -y certbot python3-certbot-nginx
-
-# Get SSL certificate for your domain
-sudo certbot --nginx -d launchit.co.in -d www.launchit.co.in
-
-# Follow the prompts:
-# 1. Enter your email
-# 2. Agree to terms (A)
-# 3. Share email? (N)
-# 4. Redirect HTTP to HTTPS? (2 - Redirect)
-
-# Verify SSL auto-renewal
-sudo certbot renew --dry-run
-# Should show: "Congratulations, all simulated renewals succeeded"
-
-# Test HTTPS
-curl https://launchit.co.in/health
-# Expected: {"status":"ok"...}
-```
-
----
-
-## STEP 17: Setup Auto-Start
-
-```bash
-# On EC2
-
-# Copy systemd service file
+# Copy service file
 sudo cp /opt/locolive/deploy/locolive.service /etc/systemd/system/
 
 # Reload systemd
@@ -471,46 +462,104 @@ sudo systemctl start locolive
 sudo systemctl status locolive
 # Should show: active (running)
 
-# Verify after reboot (optional test)
-# sudo reboot
-# Then SSH back in and check: docker ps
+# View logs
+sudo journalctl -u locolive -f
+# Press Ctrl+C to exit logs
+
+# Test API
+curl http://localhost:8080/health
 ```
 
 ---
 
-## STEP 18: Configure GitHub CI/CD
+## STEP 17: Configure Nginx
 
-### On GitHub (https://github.com/YOUR_USERNAME/locolive-backend)
+```bash
+# On EC2
 
-1. Go to **Settings → Secrets and variables → Actions**
+# Copy Nginx config
+sudo cp /opt/locolive/deploy/nginx.conf /etc/nginx/sites-available/locolive
 
-2. Click **New repository secret** and add:
+# Enable the site
+sudo ln -sf /etc/nginx/sites-available/locolive /etc/nginx/sites-enabled/
+
+# Remove default site
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# Test configuration
+sudo nginx -t
+# Expected: "syntax is ok" and "test is successful"
+
+# Reload Nginx
+sudo systemctl reload nginx
+
+# Test through Nginx
+curl http://localhost/health
+# Expected: {"status":"ok"...}
+
+# Test from domain (if DNS is set)
+curl http://launchit.co.in/health
+```
+
+---
+
+## STEP 18: Install SSL Certificate
+
+```bash
+# On EC2
+
+# Install Certbot
+sudo apt install -y certbot python3-certbot-nginx
+
+# Get SSL certificate
+sudo certbot --nginx -d launchit.co.in -d www.launchit.co.in
+
+# Follow prompts:
+# 1. Enter your email address
+# 2. Agree to terms (A)
+# 3. Share email? (N)
+# 4. Redirect HTTP to HTTPS? (2 - Redirect)
+
+# Verify auto-renewal
+sudo certbot renew --dry-run
+# Should show: "Congratulations, all simulated renewals succeeded"
+
+# Test HTTPS
+curl https://launchit.co.in/health
+# Expected: {"status":"ok"...}
+```
+
+---
+
+## STEP 19: Configure GitHub CI/CD
+
+### Add GitHub Secrets
+
+1. Go to your GitHub repo → **Settings → Secrets and variables → Actions**
+
+2. Add these secrets:
 
 | Secret Name | Value |
 |-------------|-------|
-| `EC2_HOST` | Your EC2 public IP (e.g., `13.235.123.456`) |
-| `EC2_SSH_KEY` | Contents of your locolive.pem file |
+| `EC2_HOST` | Your EC2 public IP |
+| `EC2_SSH_KEY` | Contents of locolive.pem |
+| `DATABASE_URL` | `postgres://locolive:YOUR_PASSWORD@localhost:5432/locolive?sslmode=disable` |
 
-### Get your PEM file content (on Mac):
-
+### Get PEM content (on Mac):
 ```bash
-# On your Mac
 cat ~/Downloads/locolive.pem
-# Copy the ENTIRE output including -----BEGIN RSA PRIVATE KEY----- and -----END RSA PRIVATE KEY-----
+# Copy ENTIRE output including BEGIN/END lines
 ```
 
-3. Paste the entire key content into the `EC2_SSH_KEY` secret
+### Enable Actions:
+1. Go to **Actions** tab
+2. Enable workflows if prompted
 
-### Enable GitHub Actions:
-
-1. Go to **Actions** tab in your repository
-2. Click **Enable workflows** if prompted
-
-### Now every push to `main` will auto-deploy! 🎉
+Now every push to `main` → auto-deploy! 🎉
 
 ---
 
-## STEP 19: Verify Deployment
+## STEP 20: Verify Deployment
 
 ### Test all endpoints:
 
@@ -531,53 +580,55 @@ curl -X POST https://launchit.co.in/auth/login \
 
 ---
 
-## 📋 USEFUL COMMANDS REFERENCE
+## 📋 USEFUL COMMANDS
 
 ```bash
-# SSH into EC2
+# === SSH ===
 ssh -i ~/Downloads/locolive.pem ubuntu@YOUR_EC2_IP
 
-# View all logs
-docker-compose -f /opt/locolive/deploy/docker-compose.prod.yml logs -f
+# === Service Management ===
+sudo systemctl status locolive    # Check status
+sudo systemctl restart locolive   # Restart
+sudo systemctl stop locolive      # Stop
+sudo systemctl start locolive     # Start
 
-# View only API logs
-docker-compose -f /opt/locolive/deploy/docker-compose.prod.yml logs -f api
+# === View Logs ===
+sudo journalctl -u locolive -f              # Live logs
+sudo journalctl -u locolive --since "1 hour ago"  # Last hour
+sudo tail -f /var/log/nginx/error.log       # Nginx errors
 
-# Restart API
-docker-compose -f /opt/locolive/deploy/docker-compose.prod.yml restart api
+# === Database ===
+psql -h localhost -U locolive -d locolive   # Connect to DB
+sudo -u postgres psql                        # Admin access
 
-# Restart everything
+# === Update & Redeploy (manual) ===
+cd /opt/locolive
+git pull origin main
+go build -ldflags="-w -s" -o bin/api ./cmd/api
 sudo systemctl restart locolive
 
-# Stop everything
-docker-compose -f /opt/locolive/deploy/docker-compose.prod.yml down
-
-# Pull latest code and redeploy
-cd /opt/locolive && git pull && docker-compose -f deploy/docker-compose.prod.yml up -d --build api
-
-# Check disk space
-df -h
-
-# Check memory
-free -h
-
-# Check running containers
-docker ps
+# === Check Resources ===
+free -h          # Memory
+df -h            # Disk
+htop             # CPU/Memory (install: sudo apt install htop)
 ```
 
 ---
 
 ## 🔧 TROUBLESHOOTING
 
-### Container won't start
+### Service won't start
 ```bash
-docker-compose -f deploy/docker-compose.prod.yml logs api
+sudo journalctl -u locolive -n 50 --no-pager
 ```
 
 ### Database connection error
 ```bash
-docker-compose -f deploy/docker-compose.prod.yml logs postgres
-docker exec locolive-backend-postgres-1 psql -U locolive -c "SELECT 1;"
+# Test connection
+psql -h localhost -U locolive -d locolive -c "SELECT 1;"
+
+# Check PostgreSQL is running
+sudo systemctl status postgresql
 ```
 
 ### Nginx 502 Bad Gateway
@@ -585,21 +636,20 @@ docker exec locolive-backend-postgres-1 psql -U locolive -c "SELECT 1;"
 # Check if API is running
 curl http://localhost:8080/health
 
-# Check Nginx error log
-sudo tail -f /var/log/nginx/error.log
-```
-
-### SSL certificate issues
-```bash
-sudo certbot renew
-sudo nginx -t
-sudo systemctl reload nginx
+# Check systemd service
+sudo systemctl status locolive
 ```
 
 ### Port already in use
 ```bash
 sudo lsof -i :8080
 sudo kill -9 <PID>
+```
+
+### Permission denied
+```bash
+sudo chown -R ubuntu:ubuntu /opt/locolive
+chmod +x /opt/locolive/bin/api
 ```
 
 ---
@@ -613,30 +663,33 @@ sudo kill -9 <PID>
 | Data Transfer | ~$2-5 |
 | **Total** | **~$12-15** |
 
-*First 12 months: 750 hrs/month free tier eligible*
+*First 12 months: 750 hrs/month free tier*
 
 ---
 
 ## ✅ DEPLOYMENT CHECKLIST
 
 - [ ] EC2 instance created
-- [ ] Security group configured
+- [ ] Security group configured (22, 80, 443)
 - [ ] Domain DNS pointing to EC2
-- [ ] Docker installed
-- [ ] Docker Compose installed
-- [ ] Nginx installed
-- [ ] Git installed
+- [ ] SSH connected successfully
+- [ ] System packages updated
+- [ ] Go 1.22 installed
+- [ ] PostgreSQL installed & running
+- [ ] Redis installed & running
+- [ ] Nginx installed & running
+- [ ] Migrate tool installed
 - [ ] Repository cloned
-- [ ] `.env` configured with secrets
-- [ ] Database running
+- [ ] `.env` configured
+- [ ] Database user & database created
 - [ ] Migrations executed
-- [ ] API running
+- [ ] Binary built
+- [ ] systemd service running
 - [ ] Nginx configured
 - [ ] SSL certificate installed
-- [ ] Auto-start enabled
 - [ ] GitHub secrets configured
-- [ ] CI/CD tested
+- [ ] All endpoints working
 
 ---
 
-**🎉 Congratulations! Your LocoLive backend is now live at https://launchit.co.in**
+**🎉 Congratulations! Your LocoLive backend is live at https://launchit.co.in**
