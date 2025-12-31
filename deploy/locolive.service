@@ -1,0 +1,20 @@
+[Unit]
+Description=LocoLive Backend API
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/locolive
+ExecStartPre=/usr/local/bin/docker-compose pull
+ExecStart=/usr/local/bin/docker-compose up
+ExecStop=/usr/local/bin/docker-compose down
+Restart=always
+RestartSec=10
+
+# Environment
+Environment=COMPOSE_PROJECT_NAME=locolive
+
+[Install]
+WantedBy=multi-user.target
