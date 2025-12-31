@@ -61,6 +61,9 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            # Ensure permissions are correct
+            sudo chown -R ubuntu:ubuntu /opt/locolive
+            
             # Remove existing binary to allow overwrite (fixes "Text file busy" error)
             sudo rm -f /opt/locolive/bin/api
 
