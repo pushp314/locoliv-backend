@@ -11,24 +11,27 @@ import (
 
 // Router holds all handlers and creates the chi router
 type Router struct {
-	authHandler   *AuthHandler
-	healthHandler *HealthHandler
-	jwtManager    *auth.JWTManager
-	logger        *zap.Logger
+	authHandler        *AuthHandler
+	googleOAuthHandler *GoogleOAuthHandler
+	healthHandler      *HealthHandler
+	jwtManager         *auth.JWTManager
+	logger             *zap.Logger
 }
 
 // NewRouter creates a new router
 func NewRouter(
 	authHandler *AuthHandler,
+	googleOAuthHandler *GoogleOAuthHandler,
 	healthHandler *HealthHandler,
 	jwtManager *auth.JWTManager,
 	logger *zap.Logger,
 ) *Router {
 	return &Router{
-		authHandler:   authHandler,
-		healthHandler: healthHandler,
-		jwtManager:    jwtManager,
-		logger:        logger,
+		authHandler:        authHandler,
+		googleOAuthHandler: googleOAuthHandler,
+		healthHandler:      healthHandler,
+		jwtManager:         jwtManager,
+		logger:             logger,
 	}
 }
 
@@ -72,13 +75,17 @@ func (rt *Router) Setup() *chi.Mux {
 		})
 	})
 
-	// Also expose auth at root level for compatibility
+	// Auth routes at root level for compatibility
 	r.Route("/auth", func(r chi.Router) {
 		r.Post("/register", rt.authHandler.Register)
 		r.Post("/login", rt.authHandler.Login)
 		r.Post("/refresh", rt.authHandler.Refresh)
 		r.Post("/logout", rt.authHandler.Logout)
 		r.Post("/google", rt.authHandler.GoogleLogin)
+
+		// Browser-based Google OAuth (for mobile in-app browser)
+		r.Get("/google/login", rt.googleOAuthHandler.GoogleOAuthLogin)
+		r.Get("/google/callback", rt.googleOAuthHandler.GoogleOAuthCallback)
 	})
 
 	return r

@@ -70,10 +70,11 @@ func main() {
 
 	// Initialize handlers
 	authHandler := api.NewAuthHandler(authService, repo, logger)
+	googleOAuthHandler := api.NewGoogleOAuthHandler(cfg, authService, googleAuth, logger)
 	healthHandler := api.NewHealthHandler()
 
 	// Initialize router
-	router := api.NewRouter(authHandler, healthHandler, jwtManager, logger)
+	router := api.NewRouter(authHandler, googleOAuthHandler, healthHandler, jwtManager, logger)
 	r := router.Setup()
 
 	// Start cleanup worker
