@@ -87,7 +87,7 @@ jobs:
             export $(grep -v '^#' .env | xargs)
             
             # Run migrations
-            /opt/locolive/migrate -database "${DATABASE_URL}" -path /opt/locolive/db/migrations up
+            migrate -database "${DATABASE_URL}" -path /opt/locolive/db/migrations up
             
             # Restart the service
             sudo systemctl restart locolive
