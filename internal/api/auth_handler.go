@@ -2,8 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/locolive/backend/internal/auth"
 	"github.com/locolive/backend/internal/domain"
 	"github.com/locolive/backend/internal/middleware"
@@ -266,4 +269,215 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.OK(w, user.ToResponse())
+}
+
+// ForgotPasswordRequest represents forgot password request
+type ForgotPasswordRequest struct {
+	Email string `json:"email"`
+}
+
+// ForgotPassword initiates password reset flow
+func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req ForgotPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "invalid request body")
+		return
+	}
+
+	req.Email = validator.SanitizeEmail(req.Email)
+	if !validator.ValidateEmail(req.Email) {
+		response.BadRequest(w, "invalid email address")
+		return
+	}
+
+	token, err := h.authService.InitiatePasswordReset(r.Context(), req.Email)
+	if err != nil {
+		if err == domain.ErrUserNotFound {
+			// Don't reveal if user exists - security best practice
+			response.OK(w, map[string]string{"message": "If the email exists, a reset link has been sent"})
+			return
+		}
+		h.logger.Error("forgot password failed", zap.Error(err))
+		response.InternalError(w, "failed to process request")
+		return
+	}
+
+	// In production, send email with token. For now, return token (dev only)
+	response.OK(w, map[string]string{
+		"message": "Password reset initiated",
+		"token":   token, // Remove in production - send via email instead
+	})
+}
+
+// ResetPasswordRequest represents password reset request
+type ResetPasswordRequest struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"new_password"`
+}
+
+// ResetPassword completes password reset with token
+func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req ResetPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "invalid request body")
+		return
+	}
+
+	if req.Token == "" {
+		response.BadRequest(w, "token is required")
+		return
+	}
+
+	if errs := validator.ValidatePassword(req.NewPassword); errs.HasErrors() {
+		response.BadRequest(w, errs.Error())
+		return
+	}
+
+	err := h.authService.ResetPassword(r.Context(), req.Token, req.NewPassword)
+	if err != nil {
+		if err == domain.ErrInvalidToken || err == domain.ErrTokenExpired {
+			response.BadRequest(w, "invalid or expired token")
+			return
+		}
+		h.logger.Error("reset password failed", zap.Error(err))
+		response.InternalError(w, "failed to reset password")
+		return
+	}
+
+	response.OK(w, map[string]string{"message": "Password reset successfully"})
+}
+
+// UpdatePasswordRequest represents password update request
+type UpdatePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// UpdatePassword changes password for authenticated user
+func (h *AuthHandler) UpdatePassword(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		response.Unauthorized(w, "not authenticated")
+		return
+	}
+
+	var req UpdatePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "invalid request body")
+		return
+	}
+
+	if errs := validator.ValidatePassword(req.NewPassword); errs.HasErrors() {
+		response.BadRequest(w, errs.Error())
+		return
+	}
+
+	err := h.authService.UpdatePassword(r.Context(), userID, req.CurrentPassword, req.NewPassword)
+	if err != nil {
+		if err == domain.ErrInvalidCredentials {
+			response.BadRequest(w, "current password is incorrect")
+			return
+		}
+		h.logger.Error("update password failed", zap.Error(err))
+		response.InternalError(w, "failed to update password")
+		return
+	}
+
+	response.OK(w, map[string]string{"message": "Password updated successfully"})
+}
+
+// UpdateEmailRequest represents email update request
+type UpdateEmailRequest struct {
+	NewEmail string `json:"new_email"`
+	Password string `json:"password"`
+}
+
+// UpdateEmail changes email for authenticated user
+func (h *AuthHandler) UpdateEmail(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		response.Unauthorized(w, "not authenticated")
+		return
+	}
+
+	var req UpdateEmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "invalid request body")
+		return
+	}
+
+	req.NewEmail = validator.SanitizeEmail(req.NewEmail)
+	if !validator.ValidateEmail(req.NewEmail) {
+		response.BadRequest(w, "invalid email address")
+		return
+	}
+
+	err := h.authService.UpdateEmail(r.Context(), userID, req.NewEmail, req.Password)
+	if err != nil {
+		if err == domain.ErrInvalidCredentials {
+			response.BadRequest(w, "password is incorrect")
+			return
+		}
+		if err == domain.ErrUserAlreadyExists {
+			response.BadRequest(w, "email already in use")
+			return
+		}
+		h.logger.Error("update email failed", zap.Error(err))
+		response.InternalError(w, "failed to update email")
+		return
+	}
+
+	response.OK(w, map[string]string{"message": "Email updated successfully"})
+}
+
+// UpdateProfile handles user profile update
+func (h *AuthHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		response.Unauthorized(w, "not authenticated")
+		return
+	}
+
+	var req domain.UpdateUserParams
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "invalid request body")
+		return
+	}
+
+	user, err := h.authService.UpdateProfile(r.Context(), userID, req)
+	if err != nil {
+		h.logger.Error("update profile failed", zap.Error(err))
+		response.InternalError(w, "failed to update profile")
+		return
+	}
+
+	response.OK(w, user)
+}
+
+// GetProfile handles getting a user profile by ID
+func (h *AuthHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
+	userIDStr := chi.URLParam(r, "userId")
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		response.BadRequest(w, "invalid user id")
+		return
+	}
+
+	// Just use GetUserByID from repository directly via service if exposed,
+	// or create a service method if needed.
+	// Since AuthService has repo, we can use it.
+	// But AuthService usually encapsulates logic.
+	// Let's add GetUser to AuthService.
+	user, err := h.authService.GetUser(r.Context(), userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			response.NotFound(w, "user not found")
+			return
+		}
+		h.logger.Error("get profile failed", zap.Error(err))
+		response.InternalError(w, "failed to get profile")
+		return
+	}
+
+	response.OK(w, user)
 }

@@ -8,17 +8,21 @@ import (
 
 // User represents a user in the domain layer
 type User struct {
-	ID            uuid.UUID `json:"id"`
-	Email         *string   `json:"email,omitempty"`
-	Phone         *string   `json:"phone,omitempty"`
-	Name          string    `json:"name"`
-	AvatarURL     *string   `json:"avatar_url,omitempty"`
-	GoogleID      *string   `json:"-"`
-	EmailVerified bool      `json:"email_verified"`
-	PhoneVerified bool      `json:"phone_verified"`
-	IsActive      bool      `json:"is_active"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            uuid.UUID  `json:"id"`
+	Email         *string    `json:"email,omitempty"`
+	Phone         *string    `json:"phone,omitempty"`
+	Name          string     `json:"name"`
+	AvatarURL     *string    `json:"avatar_url,omitempty"`
+	Bio           *string    `json:"bio,omitempty"`
+	Gender        *string    `json:"gender,omitempty"`
+	DateOfBirth   *time.Time `json:"date_of_birth,omitempty"`
+	Visibility    string     `json:"visibility"`
+	GoogleID      *string    `json:"-"`
+	EmailVerified bool       `json:"email_verified"`
+	PhoneVerified bool       `json:"phone_verified"`
+	IsActive      bool       `json:"is_active"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // UserResponse is the public representation of a user
@@ -28,6 +32,10 @@ type UserResponse struct {
 	Phone         string    `json:"phone,omitempty"`
 	Name          string    `json:"name"`
 	AvatarURL     string    `json:"avatar_url,omitempty"`
+	Bio           string    `json:"bio,omitempty"`
+	Gender        string    `json:"gender,omitempty"`
+	DateOfBirth   string    `json:"date_of_birth,omitempty"`
+	Visibility    string    `json:"visibility,omitempty"`
 	EmailVerified bool      `json:"email_verified"`
 	PhoneVerified bool      `json:"phone_verified"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -38,6 +46,7 @@ func (u *User) ToResponse() *UserResponse {
 	response := &UserResponse{
 		ID:            u.ID,
 		Name:          u.Name,
+		Visibility:    u.Visibility,
 		EmailVerified: u.EmailVerified,
 		PhoneVerified: u.PhoneVerified,
 		CreatedAt:     u.CreatedAt,
@@ -52,6 +61,15 @@ func (u *User) ToResponse() *UserResponse {
 	if u.AvatarURL != nil {
 		response.AvatarURL = *u.AvatarURL
 	}
+	if u.Bio != nil {
+		response.Bio = *u.Bio
+	}
+	if u.Gender != nil {
+		response.Gender = *u.Gender
+	}
+	if u.DateOfBirth != nil {
+		response.DateOfBirth = u.DateOfBirth.Format("2006-01-02")
+	}
 
 	return response
 }
@@ -63,6 +81,7 @@ type Session struct {
 	DeviceInfo     *string   `json:"device_info,omitempty"`
 	IPAddress      *string   `json:"ip_address,omitempty"`
 	UserAgent      *string   `json:"user_agent,omitempty"`
+	FCMToken       *string   `json:"fcm_token,omitempty"`
 	IsActive       bool      `json:"is_active"`
 	CreatedAt      time.Time `json:"created_at"`
 	ExpiresAt      time.Time `json:"expires_at"`
@@ -79,4 +98,14 @@ type RefreshToken struct {
 	Revoked   bool       `json:"revoked"`
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
+}
+
+// PasswordResetToken represents a password reset token
+type PasswordResetToken struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	TokenHash string    `json:"-"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Used      bool      `json:"used"`
+	CreatedAt time.Time `json:"created_at"`
 }

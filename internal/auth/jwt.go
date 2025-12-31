@@ -26,6 +26,7 @@ const (
 // Claims represents the JWT claims
 type Claims struct {
 	UserID    uuid.UUID `json:"user_id"`
+	SessionID uuid.UUID `json:"session_id,omitempty"`
 	Email     string    `json:"email,omitempty"`
 	TokenType TokenType `json:"token_type"`
 	jwt.RegisteredClaims
@@ -50,10 +51,11 @@ func NewJWTManager(secret string, accessExpiry, refreshExpiry time.Duration) *JW
 }
 
 // GenerateAccessToken creates a new access token
-func (m *JWTManager) GenerateAccessToken(userID uuid.UUID, email string) (string, error) {
+func (m *JWTManager) GenerateAccessToken(userID, sessionID uuid.UUID, email string) (string, error) {
 	now := time.Now()
 	claims := &Claims{
 		UserID:    userID,
+		SessionID: sessionID,
 		Email:     email,
 		TokenType: AccessToken,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -160,8 +162,8 @@ type TokenPair struct {
 }
 
 // GenerateTokenPair creates both access and refresh tokens
-func (m *JWTManager) GenerateTokenPair(userID uuid.UUID, email string) (*TokenPair, error) {
-	accessToken, err := m.GenerateAccessToken(userID, email)
+func (m *JWTManager) GenerateTokenPair(userID, sessionID uuid.UUID, email string) (*TokenPair, error) {
+	accessToken, err := m.GenerateAccessToken(userID, sessionID, email)
 	if err != nil {
 		return nil, err
 	}

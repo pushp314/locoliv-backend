@@ -13,8 +13,9 @@ import (
 type contextKey string
 
 const (
-	UserIDKey contextKey = "user_id"
-	EmailKey  contextKey = "email"
+	UserIDKey    contextKey = "user_id"
+	SessionIDKey contextKey = "session_id"
+	EmailKey     contextKey = "email"
 )
 
 // AuthMiddleware creates JWT authentication middleware
@@ -50,6 +51,7 @@ func AuthMiddleware(jwtManager *auth.JWTManager) func(http.Handler) http.Handler
 
 			// Add user info to context
 			ctx := context.WithValue(r.Context(), UserIDKey, claims.UserID)
+			ctx = context.WithValue(ctx, SessionIDKey, claims.SessionID)
 			ctx = context.WithValue(ctx, EmailKey, claims.Email)
 
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -61,6 +63,12 @@ func AuthMiddleware(jwtManager *auth.JWTManager) func(http.Handler) http.Handler
 func GetUserID(ctx context.Context) (uuid.UUID, bool) {
 	userID, ok := ctx.Value(UserIDKey).(uuid.UUID)
 	return userID, ok
+}
+
+// GetSessionID extracts session ID from context
+func GetSessionID(ctx context.Context) (uuid.UUID, bool) {
+	sessionID, ok := ctx.Value(SessionIDKey).(uuid.UUID)
+	return sessionID, ok
 }
 
 // GetEmail extracts email from context

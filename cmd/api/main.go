@@ -17,7 +17,9 @@ import (
 	"github.com/locolive/backend/internal/auth"
 	"github.com/locolive/backend/internal/config"
 	"github.com/locolive/backend/internal/domain"
+	"github.com/locolive/backend/internal/fcm"
 	"github.com/locolive/backend/internal/repository"
+	"github.com/locolive/backend/internal/storage"
 )
 
 func main() {
@@ -65,16 +67,50 @@ func main() {
 		logger.Warn("Google OAuth is NOT configured - set GOOGLE_CLIENT_ID to enable")
 	}
 
+	// Initialize Firebase
+	fcmClient, err := fcm.NewClient(ctx, logger, os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+	if err != nil {
+		logger.Warn("Failed to initialize Firebase client - push notifications will be disabled", zap.Error(err))
+	} else {
+		logger.Info("Firebase client initialized")
+	}
+
+	// Initialize storage
+	// Ensure upload directory exists
+	uploadDir := "./uploads"
+	baseURL := fmt.Sprintf("http://localhost:%s/uploads", cfg.Server.Port)
+	if cfg.Server.Env == "production" {
+		// In production, might be different or use S3, but for now local
+		baseURL = "https://api.locolive.com/uploads" // Adjust as needed
+	}
+
+	fileStorage, err := storage.NewLocalFileStorage(uploadDir, baseURL)
+	if err != nil {
+		logger.Fatal("Failed to initialize file storage", zap.Error(err))
+	}
+
 	// Initialize services
 	authService := domain.NewAuthService(repo, jwtManager, googleAuth)
+	storyService := domain.NewStoryService(repo, fileStorage)
+	chatService := domain.NewChatService(repo)
+	connectionService := domain.NewConnectionService(repo)
+	notificationService := domain.NewNotificationService(repo, fcmClient)
+
+	// Initialize WebSocket manager
+	wsManager := api.NewWebSocketManager(logger)
+	go wsManager.Run()
 
 	// Initialize handlers
 	authHandler := api.NewAuthHandler(authService, repo, logger)
 	googleOAuthHandler := api.NewGoogleOAuthHandler(cfg, authService, googleAuth, logger)
+	storyHandler := api.NewStoryHandler(storyService, logger)
+	chatHandler := api.NewChatHandler(chatService, wsManager, logger)
+	connectionHandler := api.NewConnectionHandler(connectionService, logger)
+	notificationHandler := api.NewNotificationHandler(notificationService, logger)
 	healthHandler := api.NewHealthHandler()
 
 	// Initialize router
-	router := api.NewRouter(authHandler, googleOAuthHandler, healthHandler, jwtManager, logger)
+	router := api.NewRouter(authHandler, googleOAuthHandler, storyHandler, chatHandler, connectionHandler, notificationHandler, healthHandler, jwtManager, logger)
 	r := router.Setup()
 
 	// Start cleanup worker

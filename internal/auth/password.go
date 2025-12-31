@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -67,4 +68,14 @@ func ValidatePasswordStrength(password string) error {
 	// - numbers
 	// - special characters
 	return nil
+}
+
+// GenerateRandomToken generates a cryptographically secure random token
+func GenerateRandomToken(length int) string {
+	bytes := make([]byte, length)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback - this should never happen
+		return hex.EncodeToString(make([]byte, length))
+	}
+	return hex.EncodeToString(bytes)
 }

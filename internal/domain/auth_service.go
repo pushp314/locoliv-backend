@@ -15,6 +15,8 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrTokenRevoked       = errors.New("token has been revoked")
 	ErrSessionExpired     = errors.New("session has expired")
+	ErrInvalidToken       = errors.New("invalid token")
+	ErrTokenExpired       = errors.New("token has expired")
 )
 
 // AuthRepository defines the interface for auth data access
@@ -25,10 +27,13 @@ type AuthRepository interface {
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	GetUserByPhone(ctx context.Context, phone string) (*User, error)
 	GetUserByGoogleID(ctx context.Context, googleID string) (*User, error)
+	UpdateUser(ctx context.Context, userID uuid.UUID, params UpdateUserParams) (*User, error)
 	UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string) error
+	UpdateUserEmail(ctx context.Context, userID uuid.UUID, email string) error
 	LinkGoogleAccount(ctx context.Context, userID uuid.UUID, googleID string) (*User, error)
 	UserExistsByEmail(ctx context.Context, email string) (bool, error)
 	UserExistsByPhone(ctx context.Context, phone string) (bool, error)
+	VerifyUserPassword(ctx context.Context, email, password string) (*User, error)
 
 	// Session operations
 	CreateSession(ctx context.Context, params CreateSessionParams) (*Session, error)
@@ -42,6 +47,11 @@ type AuthRepository interface {
 	RevokeRefreshToken(ctx context.Context, id uuid.UUID) error
 	RevokeRefreshTokenByHash(ctx context.Context, hash string) error
 	RevokeUserRefreshTokens(ctx context.Context, userID uuid.UUID) error
+
+	// Password reset token operations
+	CreatePasswordResetToken(ctx context.Context, userID uuid.UUID, tokenHash string, expiresAt time.Time) error
+	GetPasswordResetToken(ctx context.Context, tokenHash string) (*PasswordResetToken, error)
+	MarkPasswordResetTokenUsed(ctx context.Context, id uuid.UUID) error
 }
 
 // CreateUserParams holds parameters for user creation
@@ -52,6 +62,16 @@ type CreateUserParams struct {
 	Name          string
 	GoogleID      *string
 	EmailVerified bool
+}
+
+// UpdateUserParams holds parameters for user update
+type UpdateUserParams struct {
+	Name        *string    `json:"name"`
+	Bio         *string    `json:"bio"`
+	Gender      *string    `json:"gender"`
+	DateOfBirth *time.Time `json:"date_of_birth"`
+	Visibility  *string    `json:"visibility"`
+	AvatarURL   *string    `json:"avatar_url"`
 }
 
 // CreateSessionParams holds parameters for session creation
@@ -121,8 +141,18 @@ func (s *AuthService) Register(ctx context.Context, email, password, name string
 		return nil, err
 	}
 
+	// Create session
+	session, err := s.repo.CreateSession(ctx, CreateSessionParams{
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
+		// Device info could be passed in context or params, but for now defaults
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// Generate tokens
-	tokenPair, err := s.jwt.GenerateTokenPair(user.ID, email)
+	tokenPair, err := s.jwt.GenerateTokenPair(user.ID, session.ID, email)
 	if err != nil {
 		return nil, err
 	}
@@ -131,6 +161,7 @@ func (s *AuthService) Register(ctx context.Context, email, password, name string
 	tokenHash := auth.HashToken(tokenPair.RefreshToken)
 	_, err = s.repo.CreateRefreshToken(ctx, CreateRefreshTokenParams{
 		UserID:    user.ID,
+		SessionID: &session.ID,
 		TokenHash: tokenHash,
 		ExpiresAt: tokenPair.ExpiresAt,
 	})
@@ -164,12 +195,23 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Login
 		return nil, ErrInvalidCredentials
 	}
 
-	// Get the password hash from the database
-	// Note: We need to modify our approach here - the user model doesn't include password
-	// This will be handled by the repository layer
+	// Verify password
+	_, err = s.repo.VerifyUserPassword(ctx, *user.Email, password)
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	// Create session
+	session, err := s.repo.CreateSession(ctx, CreateSessionParams{
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	// Generate tokens
-	tokenPair, err := s.jwt.GenerateTokenPair(user.ID, *user.Email)
+	tokenPair, err := s.jwt.GenerateTokenPair(user.ID, session.ID, *user.Email)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +220,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Login
 	tokenHash := auth.HashToken(tokenPair.RefreshToken)
 	_, err = s.repo.CreateRefreshToken(ctx, CreateRefreshTokenParams{
 		UserID:    user.ID,
+		SessionID: &session.ID,
 		TokenHash: tokenHash,
 		ExpiresAt: tokenPair.ExpiresAt,
 	})
@@ -233,8 +276,24 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*R
 		email = *user.Email
 	}
 
+	// Handle session
+	var sessionID uuid.UUID
+	if storedToken.SessionID != nil {
+		sessionID = *storedToken.SessionID
+	} else {
+		// Legacy token without session, create one
+		session, err := s.repo.CreateSession(ctx, CreateSessionParams{
+			UserID:    claims.UserID,
+			ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+		})
+		if err != nil {
+			return nil, err
+		}
+		sessionID = session.ID
+	}
+
 	// Generate new token pair
-	tokenPair, err := s.jwt.GenerateTokenPair(claims.UserID, email)
+	tokenPair, err := s.jwt.GenerateTokenPair(claims.UserID, sessionID, email)
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +302,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*R
 	newTokenHash := auth.HashToken(tokenPair.RefreshToken)
 	_, err = s.repo.CreateRefreshToken(ctx, CreateRefreshTokenParams{
 		UserID:    claims.UserID,
+		SessionID: &sessionID,
 		TokenHash: newTokenHash,
 		ExpiresAt: tokenPair.ExpiresAt,
 	})
@@ -321,8 +381,17 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken string) (*GoogleL
 		}
 	}
 
+	// Create session
+	session, err := s.repo.CreateSession(ctx, CreateSessionParams{
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// Generate tokens
-	tokenPair, err := s.jwt.GenerateTokenPair(user.ID, googleUser.Email)
+	tokenPair, err := s.jwt.GenerateTokenPair(user.ID, session.ID, googleUser.Email)
 	if err != nil {
 		return nil, err
 	}
@@ -331,6 +400,7 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken string) (*GoogleL
 	tokenHash := auth.HashToken(tokenPair.RefreshToken)
 	_, err = s.repo.CreateRefreshToken(ctx, CreateRefreshTokenParams{
 		UserID:    user.ID,
+		SessionID: &session.ID,
 		TokenHash: tokenHash,
 		ExpiresAt: tokenPair.ExpiresAt,
 	})
@@ -349,4 +419,142 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken string) (*GoogleL
 // GetUserByID retrieves a user by ID
 func (s *AuthService) GetUserByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	return s.repo.GetUserByID(ctx, id)
+}
+
+// InitiatePasswordReset creates a password reset token
+func (s *AuthService) InitiatePasswordReset(ctx context.Context, email string) (string, error) {
+	user, err := s.repo.GetUserByEmail(ctx, email)
+	if err != nil {
+		return "", ErrUserNotFound
+	}
+
+	// Generate reset token
+	token := auth.GenerateRandomToken(32)
+	tokenHash := auth.HashToken(token)
+	expiresAt := time.Now().Add(1 * time.Hour)
+
+	err = s.repo.CreatePasswordResetToken(ctx, user.ID, tokenHash, expiresAt)
+	if err != nil {
+		return "", err
+	}
+
+	return token, nil
+}
+
+// ResetPassword resets password using a reset token
+func (s *AuthService) ResetPassword(ctx context.Context, token, newPassword string) error {
+	tokenHash := auth.HashToken(token)
+
+	// Get and validate token
+	resetToken, err := s.repo.GetPasswordResetToken(ctx, tokenHash)
+	if err != nil {
+		return ErrInvalidToken
+	}
+
+	if time.Now().After(resetToken.ExpiresAt) {
+		return ErrTokenExpired
+	}
+
+	if resetToken.Used {
+		return ErrInvalidToken
+	}
+
+	// Hash new password
+	passwordHash, err := auth.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+
+	// Update password
+	err = s.repo.UpdateUserPassword(ctx, resetToken.UserID, passwordHash)
+	if err != nil {
+		return err
+	}
+
+	// Mark token as used
+	_ = s.repo.MarkPasswordResetTokenUsed(ctx, resetToken.ID)
+
+	// Revoke all refresh tokens for security
+	_ = s.repo.RevokeUserRefreshTokens(ctx, resetToken.UserID)
+
+	return nil
+}
+
+// UpdatePassword changes password for authenticated user
+func (s *AuthService) UpdatePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error {
+	// Get user with password
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return ErrUserNotFound
+	}
+
+	if user.Email == nil {
+		return ErrInvalidCredentials
+	}
+
+	// Verify current password using repository method
+	_, err = s.repo.VerifyUserPassword(ctx, *user.Email, currentPassword)
+	if err != nil {
+		return ErrInvalidCredentials
+	}
+
+	// Hash new password
+	passwordHash, err := auth.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+
+	// Update password
+	return s.repo.UpdateUserPassword(ctx, userID, passwordHash)
+}
+
+// UpdateEmail changes email for authenticated user
+func (s *AuthService) UpdateEmail(ctx context.Context, userID uuid.UUID, newEmail, password string) error {
+	// Get user
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return ErrUserNotFound
+	}
+
+	if user.Email == nil {
+		return ErrInvalidCredentials
+	}
+
+	// Verify password
+	_, err = s.repo.VerifyUserPassword(ctx, *user.Email, password)
+	if err != nil {
+		return ErrInvalidCredentials
+	}
+
+	// Check if new email exists
+	exists, err := s.repo.UserExistsByEmail(ctx, newEmail)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrUserAlreadyExists
+	}
+
+	// Update email
+	return s.repo.UpdateUserEmail(ctx, userID, newEmail)
+}
+
+// UpdateProfile updates the authenticated user's profile
+func (s *AuthService) UpdateProfile(ctx context.Context, userID uuid.UUID, params UpdateUserParams) (*UserResponse, error) {
+	// Update user in repo
+	user, err := s.repo.UpdateUser(ctx, userID, params)
+	if err != nil {
+		return nil, err
+	}
+
+	return user.ToResponse(), nil
+}
+
+// GetUser retrieves a user by ID
+func (s *AuthService) GetUser(ctx context.Context, userID uuid.UUID) (*UserResponse, error) {
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return user.ToResponse(), nil
 }
