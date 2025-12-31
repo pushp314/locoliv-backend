@@ -37,19 +37,23 @@ ssh -i locolive.pem ubuntu@YOUR_EC2_IP
 
 ## Step 3: Run the Auto-Installer (On EC2)
 
-Run these 4 commands on your server:
+Run these commands on your server:
 
 ```bash
-# 1. Clone your repo
-git clone https://github.com/YOUR_USERNAME/locolive-backend.git
+# 1. Update & Install Git (For fresh server)
+sudo apt update
+sudo apt install -y git
 
-# 2. Go to deploy folder
+# 2. Clone your repo
+git clone https://github.com/pushp314/locoliv-backend.git
+
+# 3. Go to deploy folder
 cd locolive-backend/deploy
 
-# 3. Make script executable
+# 4. Make script executable
 chmod +x install.sh
 
-# 4. Run it!
+# 5. Run installer!
 sudo ./install.sh
 ```
 
