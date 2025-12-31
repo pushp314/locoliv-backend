@@ -79,6 +79,9 @@ jobs:
           script: |
             cd /opt/locolive
             
+            # Load environment variables
+            export $(grep -v '^#' .env | xargs)
+            
             # Run migrations
             /opt/locolive/migrate -database "${DATABASE_URL}" -path /opt/locolive/db/migrations up
             
