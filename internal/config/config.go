@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"time"
 )
 
@@ -12,6 +13,7 @@ type Config struct {
 	Redis    RedisConfig
 	JWT      JWTConfig
 	Google   GoogleConfig
+	Storage  StorageConfig
 	Log      LogConfig
 }
 
@@ -40,8 +42,18 @@ type JWTConfig struct {
 }
 
 type GoogleConfig struct {
-	ClientID     string
+	ClientIDs    []string
 	ClientSecret string
+}
+
+type StorageConfig struct {
+	Type            string // "local" or "s3"
+	Bucket          string
+	Region          string
+	Endpoint        string
+	AccessKeyID     string
+	SecretAccessKey string
+	PublicURL       string
 }
 
 type LogConfig struct {
@@ -82,8 +94,17 @@ func Load() (*Config, error) {
 			RefreshExpiry: refreshExpiry,
 		},
 		Google: GoogleConfig{
-			ClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
+			ClientIDs:    parseCSV(getEnv("GOOGLE_CLIENT_ID", "")), // We assume comma separated for multiple
 			ClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
+		},
+		Storage: StorageConfig{
+			Type:            getEnv("STORAGE_TYPE", "local"),
+			Bucket:          getEnv("R2_BUCKET_NAME", ""),
+			Region:          getEnv("R2_REGION", "auto"),
+			Endpoint:        getEnv("R2_ENDPOINT", ""),
+			AccessKeyID:     getEnv("R2_ACCESS_KEY_ID", ""),
+			SecretAccessKey: getEnv("R2_SECRET_ACCESS_KEY", ""),
+			PublicURL:       getEnv("R2_PUBLIC_URL", ""),
 		},
 		Log: LogConfig{
 			Level: getEnv("LOG_LEVEL", "debug"),
@@ -97,6 +118,22 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// parseCSV parses a comma-separated string into a slice of strings
+func parseCSV(value string) []string {
+	if value == "" {
+		return []string{}
+	}
+	var result []string
+	parts := strings.Split(value, ",")
+	for _, s := range parts {
+		trimmed := strings.TrimSpace(s)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 // IsProduction returns true if running in production

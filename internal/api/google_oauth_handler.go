@@ -29,19 +29,26 @@ func NewGoogleOAuthHandler(
 	verifier *auth.GoogleAuthVerifier,
 	logger *zap.Logger,
 ) *GoogleOAuthHandler {
-	// Determine the callback URL based on environment
-	redirectURL := "https://launchit.co.in/auth/google/callback"
 
-	oauthConfig := &oauth2.Config{
-		ClientID:     cfg.Google.ClientID,
+	// Use the first configured client ID for the web flow, or empty if none
+	clientID := ""
+	if len(cfg.Google.ClientIDs) > 0 {
+		clientID = cfg.Google.ClientIDs[0]
+	}
+
+	conf := &oauth2.Config{
+		ClientID:     clientID,
 		ClientSecret: cfg.Google.ClientSecret,
-		RedirectURL:  redirectURL,
-		Scopes:       []string{"openid", "profile", "email"},
-		Endpoint:     google.Endpoint,
+		RedirectURL:  "https://launchit.co.in/auth/google/callback", // TODO: Make configurable
+		Scopes: []string{
+			"https://www.googleapis.com/auth/userinfo.email",
+			"https://www.googleapis.com/auth/userinfo.profile",
+		},
+		Endpoint: google.Endpoint,
 	}
 
 	return &GoogleOAuthHandler{
-		config:      oauthConfig,
+		config:      conf,
 		authService: authService,
 		verifier:    verifier,
 		logger:      logger,

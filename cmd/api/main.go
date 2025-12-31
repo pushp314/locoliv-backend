@@ -58,7 +58,7 @@ func main() {
 	// Initialize dependencies
 	repo := repository.NewPostgresRepository(db)
 	jwtManager := auth.NewJWTManager(cfg.JWT.Secret, cfg.JWT.AccessExpiry, cfg.JWT.RefreshExpiry)
-	googleAuth := auth.NewGoogleAuthVerifier(cfg.Google.ClientID)
+	googleAuth := auth.NewGoogleAuthVerifier(cfg.Google.ClientIDs)
 
 	// Log Google OAuth status
 	if googleAuth.IsConfigured() {
@@ -76,25 +76,39 @@ func main() {
 	}
 
 	// Initialize storage
-	// Ensure upload directory exists
-	uploadDir := "./uploads"
-	baseURL := fmt.Sprintf("http://localhost:%s/uploads", cfg.Server.Port)
-	if cfg.Server.Env == "production" {
-		// In production, might be different or use S3, but for now local
-		baseURL = "https://api.locolive.com/uploads" // Adjust as needed
-	}
+	// Initialize storage
+	var fileStorage storage.FileStorage
 
-	fileStorage, err := storage.NewLocalFileStorage(uploadDir, baseURL)
-	if err != nil {
-		logger.Fatal("Failed to initialize file storage", zap.Error(err))
+	if cfg.Storage.Type == "s3" {
+		logger.Info("Initializing S3/R2 storage", zap.String("bucket", cfg.Storage.Bucket))
+		s3Store, err := storage.NewS3Storage(ctx, cfg.Storage)
+		if err != nil {
+			logger.Fatal("Failed to initialize S3 storage", zap.Error(err))
+		}
+		fileStorage = s3Store
+	} else {
+		// Ensure upload directory exists
+		uploadDir := "./uploads"
+		baseURL := fmt.Sprintf("http://localhost:%s/uploads", cfg.Server.Port)
+		if cfg.Server.Env == "production" {
+			// In production, might be different or use S3, but for now local
+			baseURL = "https://api.locolive.com/uploads" // Adjust as needed
+		}
+
+		localStore, err := storage.NewLocalFileStorage(uploadDir, baseURL)
+		if err != nil {
+			logger.Fatal("Failed to initialize file storage", zap.Error(err))
+		}
+		fileStorage = localStore
+		logger.Info("Initialized Local file storage", zap.String("dir", uploadDir))
 	}
 
 	// Initialize services
+	notificationService := domain.NewNotificationService(repo, fcmClient)
 	authService := domain.NewAuthService(repo, jwtManager, googleAuth)
 	storyService := domain.NewStoryService(repo, fileStorage)
-	chatService := domain.NewChatService(repo)
-	connectionService := domain.NewConnectionService(repo)
-	notificationService := domain.NewNotificationService(repo, fcmClient)
+	chatService := domain.NewChatService(repo, notificationService)
+	connectionService := domain.NewConnectionService(repo, notificationService)
 
 	// Initialize WebSocket manager
 	wsManager := api.NewWebSocketManager(logger)

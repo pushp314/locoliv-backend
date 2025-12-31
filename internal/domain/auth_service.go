@@ -28,6 +28,7 @@ type AuthRepository interface {
 	GetUserByPhone(ctx context.Context, phone string) (*User, error)
 	GetUserByGoogleID(ctx context.Context, googleID string) (*User, error)
 	UpdateUser(ctx context.Context, userID uuid.UUID, params UpdateUserParams) (*User, error)
+	DeleteUser(ctx context.Context, userID uuid.UUID) error
 	UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string) error
 	UpdateUserEmail(ctx context.Context, userID uuid.UUID, email string) error
 	LinkGoogleAccount(ctx context.Context, userID uuid.UUID, googleID string) (*User, error)
@@ -557,4 +558,9 @@ func (s *AuthService) GetUser(ctx context.Context, userID uuid.UUID) (*UserRespo
 		return nil, err
 	}
 	return user.ToResponse(), nil
+}
+
+// DeleteAccount deletes a user account (soft delete)
+func (s *AuthService) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
+	return s.repo.DeleteUser(ctx, userID)
 }

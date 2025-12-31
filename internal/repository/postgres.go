@@ -292,6 +292,35 @@ func (r *PostgresRepository) UpdateUser(ctx context.Context, userID uuid.UUID, p
 	return scanUser(row)
 }
 
+// DeleteUser performs a soft delete on a user
+func (r *PostgresRepository) DeleteUser(ctx context.Context, userID uuid.UUID) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// 1. Set is_active = FALSE
+	_, err = tx.Exec(ctx, "UPDATE users SET is_active = FALSE WHERE id = $1", userID)
+	if err != nil {
+		return err
+	}
+
+	// 2. Revoke all sessions
+	_, err = tx.Exec(ctx, "UPDATE sessions SET is_active = FALSE WHERE user_id = $1", userID)
+	if err != nil {
+		return err
+	}
+
+	// 3. Revoke all refresh tokens
+	_, err = tx.Exec(ctx, "UPDATE refresh_tokens SET revoked = TRUE, revoked_at = NOW() WHERE user_id = $1", userID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
 // Helper functions for scanning rows
 
 func scanUser(row pgx.Row) (*domain.User, error) {

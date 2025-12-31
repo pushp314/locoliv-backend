@@ -23,20 +23,30 @@ type GoogleUser struct {
 
 // GoogleAuthVerifier handles Google ID token verification
 type GoogleAuthVerifier struct {
-	clientID string
+	clientIDs []string
 }
 
 // NewGoogleAuthVerifier creates a new Google auth verifier
-func NewGoogleAuthVerifier(clientID string) *GoogleAuthVerifier {
+func NewGoogleAuthVerifier(clientIDs []string) *GoogleAuthVerifier {
 	return &GoogleAuthVerifier{
-		clientID: clientID,
+		clientIDs: clientIDs,
 	}
 }
 
 // VerifyIDToken verifies a Google ID token and returns the user info
 func (v *GoogleAuthVerifier) VerifyIDToken(ctx context.Context, idToken string) (*GoogleUser, error) {
-	payload, err := idtoken.Validate(ctx, idToken, v.clientID)
-	if err != nil {
+	// Try to validate with each client ID
+	var payload *idtoken.Payload
+	var err error
+
+	for _, clientID := range v.clientIDs {
+		payload, err = idtoken.Validate(ctx, idToken, clientID)
+		if err == nil {
+			break
+		}
+	}
+
+	if payload == nil {
 		return nil, ErrInvalidGoogleToken
 	}
 
@@ -77,5 +87,5 @@ func (v *GoogleAuthVerifier) VerifyIDToken(ctx context.Context, idToken string) 
 
 // IsConfigured returns true if Google OAuth is configured
 func (v *GoogleAuthVerifier) IsConfigured() bool {
-	return v.clientID != ""
+	return len(v.clientIDs) > 0 && v.clientIDs[0] != ""
 }

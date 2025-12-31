@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -44,13 +45,20 @@ func LoggingMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
 			start := time.Now()
 			wrapped := wrapResponseWriter(w)
 
+			// Request ID
+			requestID := r.Header.Get("X-Request-ID")
+			if requestID == "" {
+				requestID = uuid.New().String()
+			}
+			w.Header().Set("X-Request-ID", requestID)
+
 			// Process request
 			next.ServeHTTP(wrapped, r)
 
 			// Log after request
 			duration := time.Since(start)
 
-			logger.Info("http request",
+			fields := []zap.Field{
 				zap.String("method", r.Method),
 				zap.String("path", r.URL.Path),
 				zap.String("query", r.URL.RawQuery),
@@ -59,7 +67,15 @@ func LoggingMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
 				zap.Duration("duration", duration),
 				zap.String("ip", getRealIP(r)),
 				zap.String("user_agent", r.UserAgent()),
-			)
+				zap.String("request_id", requestID),
+			}
+
+			// Add user ID if present (from auth middleware)
+			if userID, ok := GetUserID(r.Context()); ok {
+				fields = append(fields, zap.String("user_id", userID.String()))
+			}
+
+			logger.Info("http request", fields...)
 		})
 	}
 }
