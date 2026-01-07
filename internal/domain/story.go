@@ -36,4 +36,6 @@ type StoryRepository interface {
 	GetActiveStories(ctx context.Context, limit, offset int) ([]*Story, error)
 	GetStoriesByLocation(ctx context.Context, lat, lng, radius float64, limit, offset int) ([]*Story, error)
 	DeleteExpiredStories(ctx context.Context) (int64, error)
+	GetStoryByID(ctx context.Context, storyID uuid.UUID) (*Story, error)
+	DeleteStory(ctx context.Context, storyID, userID uuid.UUID) error
 }

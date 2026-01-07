@@ -111,6 +111,20 @@ func main() {
 	connectionService := domain.NewConnectionService(repo, notificationService)
 	karmaService := domain.NewKarmaService(repo)
 
+	// Initialize feature repositories
+	neighborhoodRepo := repository.NewNeighborhoodRepository(db)
+	privacyRepo := repository.NewPrivacyRepository(db)
+	challengeRepo := repository.NewChallengeRepository(db)
+	eventRepo := repository.NewEventRepository(db)
+	icebreakerRepo := repository.NewIcebreakerRepository(db)
+
+	// Initialize feature services
+	neighborhoodService := domain.NewNeighborhoodService(neighborhoodRepo, karmaService)
+	privacyService := domain.NewPrivacyService(privacyRepo)
+	challengeService := domain.NewChallengeService(challengeRepo, karmaService)
+	eventService := domain.NewEventService(eventRepo, karmaService)
+	icebreakerService := domain.NewIcebreakerService(icebreakerRepo, karmaService)
+
 	// Initialize WebSocket manager
 	wsManager := api.NewWebSocketManager(logger)
 	go wsManager.Run()
@@ -124,11 +138,11 @@ func main() {
 	notificationHandler := api.NewNotificationHandler(notificationService, logger)
 	karmaHandler := api.NewKarmaHandler(karmaService, logger)
 	leaderboardHandler := api.NewLeaderboardHandler(logger)
-	neighborhoodHandler := api.NewNeighborhoodHandler(nil, logger) // TODO: Wire NeighborhoodService
-	privacyHandler := api.NewPrivacyHandler(nil, logger)           // TODO: Wire PrivacyService
-	challengeHandler := api.NewChallengeHandler(nil, logger)       // TODO: Wire ChallengeService
-	eventHandler := api.NewEventHandler(nil, logger)               // TODO: Wire EventService
-	icebreakerHandler := api.NewIcebreakerHandler(nil, logger)     // TODO: Wire IcebreakerService
+	neighborhoodHandler := api.NewNeighborhoodHandler(neighborhoodService, logger)
+	privacyHandler := api.NewPrivacyHandler(privacyService, logger)
+	challengeHandler := api.NewChallengeHandler(challengeService, logger)
+	eventHandler := api.NewEventHandler(eventService, logger)
+	icebreakerHandler := api.NewIcebreakerHandler(icebreakerService, logger)
 	healthHandler := api.NewHealthHandler()
 
 	// Initialize router
@@ -141,9 +155,37 @@ func main() {
 	)
 	r := router.Setup()
 
-	// Start cleanup worker
+	// Start cleanup workers
 	cleanupCtx, cleanupCancel := context.WithCancel(ctx)
 	repo.StartCleanupWorker(cleanupCtx, 1*time.Hour)
+
+	// Start story expiry cleanup (runs every hour)
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+
+		// Run immediately on startup
+		count, err := repo.CleanupExpiredStories(cleanupCtx)
+		if err != nil {
+			logger.Error("Failed to cleanup expired stories", zap.Error(err))
+		} else if count > 0 {
+			logger.Info("Cleaned up expired stories", zap.Int64("count", count))
+		}
+
+		for {
+			select {
+			case <-ticker.C:
+				count, err := repo.CleanupExpiredStories(cleanupCtx)
+				if err != nil {
+					logger.Error("Failed to cleanup expired stories", zap.Error(err))
+				} else if count > 0 {
+					logger.Info("Cleaned up expired stories", zap.Int64("count", count))
+				}
+			case <-cleanupCtx.Done():
+				return
+			}
+		}
+	}()
 
 	// Create server
 	srv := &http.Server{

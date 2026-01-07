@@ -5,6 +5,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/locolive/backend/internal/storage"
 )
 
@@ -49,4 +50,14 @@ func (s *StoryService) GetFeed(ctx context.Context, page, limit int, lat, lng, r
 	}
 
 	return s.repo.GetActiveStories(ctx, limit, offset)
+}
+
+// GetStory retrieves a single story by ID
+func (s *StoryService) GetStory(ctx context.Context, storyID uuid.UUID) (*Story, error) {
+	return s.repo.GetStoryByID(ctx, storyID)
+}
+
+// DeleteStory deletes a story owned by the user
+func (s *StoryService) DeleteStory(ctx context.Context, storyID, userID uuid.UUID) error {
+	return s.repo.DeleteStory(ctx, storyID, userID)
 }

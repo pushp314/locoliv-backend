@@ -125,6 +125,8 @@ func (rt *Router) Setup() *chi.Mux {
 			r.Route("/stories", func(r chi.Router) {
 				r.Post("/", rt.storyHandler.CreateStory)
 				r.Get("/feed", rt.storyHandler.GetFeed)
+				r.Get("/{storyId}", rt.storyHandler.GetStory)
+				r.Delete("/{storyId}", rt.storyHandler.DeleteStory)
 			})
 
 			// Chat routes

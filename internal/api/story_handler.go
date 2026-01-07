@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/locolive/backend/internal/domain"
 	"github.com/locolive/backend/internal/middleware"
 	"github.com/locolive/backend/pkg/response"
@@ -116,4 +118,47 @@ func (h *StoryHandler) GetFeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.OK(w, stories)
+}
+
+// GetStory handles fetching a single story
+func (h *StoryHandler) GetStory(w http.ResponseWriter, r *http.Request) {
+	storyIDStr := chi.URLParam(r, "storyId")
+	storyID, err := uuid.Parse(storyIDStr)
+	if err != nil {
+		response.BadRequest(w, "invalid story ID")
+		return
+	}
+
+	story, err := h.storyService.GetStory(r.Context(), storyID)
+	if err != nil {
+		h.logger.Error("get story failed", zap.Error(err))
+		response.NotFound(w, "story not found")
+		return
+	}
+
+	response.OK(w, story)
+}
+
+// DeleteStory handles deleting a story
+func (h *StoryHandler) DeleteStory(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		response.Unauthorized(w, "not authenticated")
+		return
+	}
+
+	storyIDStr := chi.URLParam(r, "storyId")
+	storyID, err := uuid.Parse(storyIDStr)
+	if err != nil {
+		response.BadRequest(w, "invalid story ID")
+		return
+	}
+
+	if err := h.storyService.DeleteStory(r.Context(), storyID, userID); err != nil {
+		h.logger.Error("delete story failed", zap.Error(err))
+		response.InternalError(w, "failed to delete story")
+		return
+	}
+
+	response.OK(w, map[string]string{"message": "story deleted"})
 }
