@@ -21,6 +21,13 @@ type Router struct {
 	chatHandler         *ChatHandler
 	connectionHandler   *ConnectionHandler
 	notificationHandler *NotificationHandler
+	karmaHandler        *KarmaHandler
+	leaderboardHandler  *LeaderboardHandler
+	neighborhoodHandler *NeighborhoodHandler
+	privacyHandler      *PrivacyHandler
+	challengeHandler    *ChallengeHandler
+	eventHandler        *EventHandler
+	icebreakerHandler   *IcebreakerHandler
 	healthHandler       *HealthHandler
 	jwtManager          *auth.JWTManager
 	logger              *zap.Logger
@@ -34,6 +41,13 @@ func NewRouter(
 	chatHandler *ChatHandler,
 	connectionHandler *ConnectionHandler,
 	notificationHandler *NotificationHandler,
+	karmaHandler *KarmaHandler,
+	leaderboardHandler *LeaderboardHandler,
+	neighborhoodHandler *NeighborhoodHandler,
+	privacyHandler *PrivacyHandler,
+	challengeHandler *ChallengeHandler,
+	eventHandler *EventHandler,
+	icebreakerHandler *IcebreakerHandler,
 	healthHandler *HealthHandler,
 	jwtManager *auth.JWTManager,
 	logger *zap.Logger,
@@ -45,6 +59,13 @@ func NewRouter(
 		chatHandler:         chatHandler,
 		connectionHandler:   connectionHandler,
 		notificationHandler: notificationHandler,
+		karmaHandler:        karmaHandler,
+		leaderboardHandler:  leaderboardHandler,
+		neighborhoodHandler: neighborhoodHandler,
+		privacyHandler:      privacyHandler,
+		challengeHandler:    challengeHandler,
+		eventHandler:        eventHandler,
+		icebreakerHandler:   icebreakerHandler,
 		healthHandler:       healthHandler,
 		jwtManager:          jwtManager,
 		logger:              logger,
@@ -127,6 +148,73 @@ func (rt *Router) Setup() *chi.Mux {
 				r.Get("/", rt.notificationHandler.GetNotifications)
 				r.Put("/{id}/read", rt.notificationHandler.MarkRead)
 				r.Post("/fcm-token", rt.notificationHandler.UpdateFCMToken)
+			})
+
+			// Karma & Premium routes
+			r.Route("/karma", func(r chi.Router) {
+				r.Get("/me", rt.karmaHandler.GetMyKarma)
+				r.Get("/badges", rt.karmaHandler.GetBadges)
+				r.Get("/leaderboard", rt.karmaHandler.GetLeaderboard)
+			})
+
+			r.Route("/premium", func(r chi.Router) {
+				r.Get("/status", rt.karmaHandler.GetPremiumStatus)
+				r.Post("/redeem", rt.karmaHandler.RedeemKarmaForPremium)
+				// Payment routes (will be wired when PaymentHandler is added)
+				// r.Post("/order", rt.paymentHandler.CreateOrder)
+				// r.Post("/verify", rt.paymentHandler.VerifyPayment)
+			})
+
+			// Story boost
+			r.Post("/stories/{storyId}/boost", rt.karmaHandler.BoostStory)
+
+			// Leaderboard routes
+			r.Route("/leaderboard", func(r chi.Router) {
+				r.Get("/city", rt.leaderboardHandler.GetCityLeaderboard)
+				r.Get("/me", rt.leaderboardHandler.GetMyRank)
+			})
+
+			// Neighborhood (Ask Neighborhood) routes
+			r.Route("/neighborhood", func(r chi.Router) {
+				r.Get("/posts", rt.neighborhoodHandler.GetPosts)
+				r.Post("/posts", rt.neighborhoodHandler.CreatePost)
+				r.Post("/posts/{postId}/answers", rt.neighborhoodHandler.AnswerPost)
+				r.Post("/posts/{postId}/upvote", rt.neighborhoodHandler.UpvotePost)
+			})
+
+			// Privacy routes
+			r.Route("/privacy", func(r chi.Router) {
+				r.Get("/settings", rt.privacyHandler.GetSettings)
+				r.Put("/settings", rt.privacyHandler.UpdateSettings)
+				r.Post("/block", rt.privacyHandler.BlockUser)
+				r.Delete("/block/{userId}", rt.privacyHandler.UnblockUser)
+				r.Get("/blocked", rt.privacyHandler.GetBlockedUsers)
+				r.Post("/family/{userId}", rt.privacyHandler.AddToFamily)
+			})
+
+			// Daily Challenges routes
+			r.Route("/challenges", func(r chi.Router) {
+				r.Get("/today", rt.challengeHandler.GetDailyChallenges)
+				r.Get("/festival", rt.challengeHandler.GetFestivalStatus)
+			})
+
+			// Events routes
+			r.Route("/events", func(r chi.Router) {
+				r.Get("/", rt.eventHandler.GetEvents)
+				r.Post("/", rt.eventHandler.CreateEvent)
+				r.Get("/me", rt.eventHandler.GetMyEvents)
+				r.Get("/{eventId}", rt.eventHandler.GetEvent)
+				r.Post("/{eventId}/rsvp", rt.eventHandler.RSVPEvent)
+			})
+
+			// Icebreaker routes
+			r.Route("/icebreaker", func(r chi.Router) {
+				r.Get("/today", rt.icebreakerHandler.GetTodaysMatch)
+				r.Post("/{matchId}/respond", rt.icebreakerHandler.RespondToMatch)
+				r.Get("/interests", rt.icebreakerHandler.GetMyInterests)
+				r.Post("/interests", rt.icebreakerHandler.AddInterest)
+				r.Delete("/interests/{interest}", rt.icebreakerHandler.RemoveInterest)
+				r.Get("/interests/suggestions", rt.icebreakerHandler.GetSuggestedInterests)
 			})
 		})
 	})

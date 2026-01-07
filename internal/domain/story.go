@@ -18,6 +18,7 @@ type Story struct {
 	ExpiresAt   time.Time     `json:"expires_at"`
 	CreatedAt   time.Time     `json:"created_at"`
 	User        *UserResponse `json:"user,omitempty"` // For feed response
+	IsBoosted   bool          `json:"is_boosted"`     // Whether story is currently boosted
 }
 
 type CreateStoryParams struct {

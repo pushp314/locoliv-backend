@@ -109,6 +109,7 @@ func main() {
 	storyService := domain.NewStoryService(repo, fileStorage)
 	chatService := domain.NewChatService(repo, notificationService)
 	connectionService := domain.NewConnectionService(repo, notificationService)
+	karmaService := domain.NewKarmaService(repo)
 
 	// Initialize WebSocket manager
 	wsManager := api.NewWebSocketManager(logger)
@@ -121,10 +122,23 @@ func main() {
 	chatHandler := api.NewChatHandler(chatService, wsManager, logger)
 	connectionHandler := api.NewConnectionHandler(connectionService, logger)
 	notificationHandler := api.NewNotificationHandler(notificationService, logger)
+	karmaHandler := api.NewKarmaHandler(karmaService, logger)
+	leaderboardHandler := api.NewLeaderboardHandler(logger)
+	neighborhoodHandler := api.NewNeighborhoodHandler(nil, logger) // TODO: Wire NeighborhoodService
+	privacyHandler := api.NewPrivacyHandler(nil, logger)           // TODO: Wire PrivacyService
+	challengeHandler := api.NewChallengeHandler(nil, logger)       // TODO: Wire ChallengeService
+	eventHandler := api.NewEventHandler(nil, logger)               // TODO: Wire EventService
+	icebreakerHandler := api.NewIcebreakerHandler(nil, logger)     // TODO: Wire IcebreakerService
 	healthHandler := api.NewHealthHandler()
 
 	// Initialize router
-	router := api.NewRouter(authHandler, googleOAuthHandler, storyHandler, chatHandler, connectionHandler, notificationHandler, healthHandler, jwtManager, logger)
+	router := api.NewRouter(
+		authHandler, googleOAuthHandler, storyHandler, chatHandler,
+		connectionHandler, notificationHandler, karmaHandler,
+		leaderboardHandler, neighborhoodHandler, privacyHandler, challengeHandler,
+		eventHandler, icebreakerHandler,
+		healthHandler, jwtManager, logger,
+	)
 	r := router.Setup()
 
 	// Start cleanup worker

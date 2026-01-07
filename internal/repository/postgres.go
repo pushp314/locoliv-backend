@@ -994,3 +994,238 @@ func (r *PostgresRepository) GetFCMTokens(ctx context.Context, userID uuid.UUID)
 	}
 	return tokens, nil
 }
+
+// ========== KARMA SYSTEM ==========
+
+func (r *PostgresRepository) GetUserKarma(ctx context.Context, userID uuid.UUID) (*domain.UserKarma, error) {
+	query := `
+		SELECT user_id, total_karma, current_tier, prabhav_score, login_streak, 
+			   TO_CHAR(last_login_date, 'YYYY-MM-DD'), last_calculated_at
+		FROM user_karma WHERE user_id = $1
+	`
+	var karma domain.UserKarma
+	var lastLogin *string
+	err := r.db.QueryRow(ctx, query, userID).Scan(
+		&karma.UserID, &karma.TotalKarma, &karma.CurrentTier, &karma.PrabhavScore,
+		&karma.LoginStreak, &lastLogin, &karma.LastCalculatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	karma.LastLoginDate = lastLogin
+	return &karma, nil
+}
+
+func (r *PostgresRepository) CreateUserKarma(ctx context.Context, userID uuid.UUID) (*domain.UserKarma, error) {
+	query := `
+		INSERT INTO user_karma (user_id) VALUES ($1)
+		ON CONFLICT (user_id) DO NOTHING
+		RETURNING user_id, total_karma, current_tier, prabhav_score, login_streak, last_calculated_at
+	`
+	var karma domain.UserKarma
+	err := r.db.QueryRow(ctx, query, userID).Scan(
+		&karma.UserID, &karma.TotalKarma, &karma.CurrentTier, &karma.PrabhavScore,
+		&karma.LoginStreak, &karma.LastCalculatedAt,
+	)
+	if err != nil {
+		// Might already exist, fetch it
+		return r.GetUserKarma(ctx, userID)
+	}
+	return &karma, nil
+}
+
+func (r *PostgresRepository) UpdateUserKarma(ctx context.Context, userID uuid.UUID, totalKarma int, tier domain.KarmaTier, prabhav float64) error {
+	query := `
+		UPDATE user_karma 
+		SET total_karma = $2, current_tier = $3, prabhav_score = $4, updated_at = NOW()
+		WHERE user_id = $1
+	`
+	_, err := r.db.Exec(ctx, query, userID, totalKarma, tier, prabhav)
+	return err
+}
+
+func (r *PostgresRepository) UpdateLoginStreak(ctx context.Context, userID uuid.UUID, streak int, loginDate string) error {
+	query := `
+		UPDATE user_karma 
+		SET login_streak = $2, last_login_date = $3::DATE, updated_at = NOW()
+		WHERE user_id = $1
+	`
+	_, err := r.db.Exec(ctx, query, userID, streak, loginDate)
+	return err
+}
+
+func (r *PostgresRepository) CreateKarmaTransaction(ctx context.Context, userID uuid.UUID, action domain.KarmaAction, points int, refType *string, refID *uuid.UUID, desc *string) error {
+	query := `
+		INSERT INTO karma_transactions (user_id, action, points, reference_type, reference_id, description)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+	_, err := r.db.Exec(ctx, query, userID, action, points, refType, refID, desc)
+	return err
+}
+
+func (r *PostgresRepository) GetKarmaTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]domain.KarmaTransaction, error) {
+	query := `
+		SELECT id, user_id, action, points, reference_type, reference_id, description, created_at
+		FROM karma_transactions
+		WHERE user_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+	rows, err := r.db.Query(ctx, query, userID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var txns []domain.KarmaTransaction
+	for rows.Next() {
+		var t domain.KarmaTransaction
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Action, &t.Points, &t.ReferenceType, &t.ReferenceID, &t.Description, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		txns = append(txns, t)
+	}
+	return txns, nil
+}
+
+func (r *PostgresRepository) GetAllBadges(ctx context.Context) ([]domain.Badge, error) {
+	query := `SELECT code, name_sanskrit, name_hindi, description, min_karma, icon_url, sort_order FROM badges ORDER BY sort_order`
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var badges []domain.Badge
+	for rows.Next() {
+		var b domain.Badge
+		if err := rows.Scan(&b.Code, &b.NameSanskrit, &b.NameHindi, &b.Description, &b.MinKarma, &b.IconURL, &b.SortOrder); err != nil {
+			return nil, err
+		}
+		badges = append(badges, b)
+	}
+	return badges, nil
+}
+
+func (r *PostgresRepository) GetUserBadges(ctx context.Context, userID uuid.UUID) ([]domain.UserBadge, error) {
+	query := `
+		SELECT ub.id, ub.user_id, ub.badge_code, ub.earned_at,
+		       b.code, b.name_sanskrit, b.name_hindi, b.description, b.min_karma, b.icon_url, b.sort_order
+		FROM user_badges ub
+		JOIN badges b ON ub.badge_code = b.code
+		WHERE ub.user_id = $1
+		ORDER BY b.sort_order
+	`
+	rows, err := r.db.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var badges []domain.UserBadge
+	for rows.Next() {
+		var ub domain.UserBadge
+		var b domain.Badge
+		if err := rows.Scan(&ub.ID, &ub.UserID, &ub.BadgeCode, &ub.EarnedAt,
+			&b.Code, &b.NameSanskrit, &b.NameHindi, &b.Description, &b.MinKarma, &b.IconURL, &b.SortOrder); err != nil {
+			return nil, err
+		}
+		ub.Badge = &b
+		badges = append(badges, ub)
+	}
+	return badges, nil
+}
+
+func (r *PostgresRepository) AwardBadge(ctx context.Context, userID uuid.UUID, badgeCode string) error {
+	query := `INSERT INTO user_badges (user_id, badge_code) VALUES ($1, $2) ON CONFLICT DO NOTHING`
+	_, err := r.db.Exec(ctx, query, userID, badgeCode)
+	return err
+}
+
+func (r *PostgresRepository) GetActiveSubscription(ctx context.Context, userID uuid.UUID) (*domain.Subscription, error) {
+	query := `
+		SELECT id, user_id, plan, status, started_at, expires_at, payment_provider, payment_id, amount_paid
+		FROM subscriptions
+		WHERE user_id = $1 AND status = 'active' AND expires_at > NOW()
+		ORDER BY expires_at DESC LIMIT 1
+	`
+	var sub domain.Subscription
+	err := r.db.QueryRow(ctx, query, userID).Scan(
+		&sub.ID, &sub.UserID, &sub.Plan, &sub.Status, &sub.StartedAt, &sub.ExpiresAt,
+		&sub.PaymentProvider, &sub.PaymentID, &sub.AmountPaid,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &sub, nil
+}
+
+func (r *PostgresRepository) CreateSubscription(ctx context.Context, sub *domain.Subscription) error {
+	query := `
+		INSERT INTO subscriptions (id, user_id, plan, status, started_at, expires_at, payment_provider, payment_id, amount_paid)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`
+	_, err := r.db.Exec(ctx, query, sub.ID, sub.UserID, sub.Plan, sub.Status, sub.StartedAt, sub.ExpiresAt, sub.PaymentProvider, sub.PaymentID, sub.AmountPaid)
+	return err
+}
+
+func (r *PostgresRepository) UpdateSubscriptionStatus(ctx context.Context, subID uuid.UUID, status domain.SubscriptionStatus) error {
+	query := `UPDATE subscriptions SET status = $2, updated_at = NOW() WHERE id = $1`
+	_, err := r.db.Exec(ctx, query, subID, status)
+	return err
+}
+
+func (r *PostgresRepository) CreateStoryBoost(ctx context.Context, boost *domain.StoryBoost) error {
+	query := `
+		INSERT INTO story_boosts (id, story_id, user_id, boost_type, boost_multiplier, boosted_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`
+	_, err := r.db.Exec(ctx, query, boost.ID, boost.StoryID, boost.UserID, boost.BoostType, boost.BoostMultiplier, boost.BoostedAt, boost.ExpiresAt)
+	return err
+}
+
+func (r *PostgresRepository) GetActiveBoosts(ctx context.Context, storyID uuid.UUID) ([]domain.StoryBoost, error) {
+	query := `
+		SELECT id, story_id, user_id, boost_type, boost_multiplier, boosted_at, expires_at
+		FROM story_boosts
+		WHERE story_id = $1 AND expires_at > NOW()
+	`
+	rows, err := r.db.Query(ctx, query, storyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var boosts []domain.StoryBoost
+	for rows.Next() {
+		var b domain.StoryBoost
+		if err := rows.Scan(&b.ID, &b.StoryID, &b.UserID, &b.BoostType, &b.BoostMultiplier, &b.BoostedAt, &b.ExpiresAt); err != nil {
+			return nil, err
+		}
+		boosts = append(boosts, b)
+	}
+	return boosts, nil
+}
+
+func (r *PostgresRepository) GetUserBoostCount(ctx context.Context, userID uuid.UUID, since time.Time) (int, error) {
+	query := `SELECT COUNT(*) FROM story_boosts WHERE user_id = $1 AND boosted_at >= $2`
+	var count int
+	err := r.db.QueryRow(ctx, query, userID, since).Scan(&count)
+	return count, err
+}
+
+func (r *PostgresRepository) GetUserStoryStats(ctx context.Context, userID uuid.UUID) (totalStories, totalViews, totalReactions, totalReplies int, err error) {
+	// This query requires adding view_count to stories or from analytics
+	// For now, simple count
+	query := `SELECT COUNT(*) FROM stories WHERE user_id = $1`
+	err = r.db.QueryRow(ctx, query, userID).Scan(&totalStories)
+	if err != nil {
+		return
+	}
+	// TODO: Add actual view/reaction tracking tables
+	// For now return placeholders
+	totalViews = totalStories * 10    // Placeholder
+	totalReactions = totalStories * 3 // Placeholder
+	totalReplies = totalStories * 1   // Placeholder
+	return
+}
