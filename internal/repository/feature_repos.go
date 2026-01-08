@@ -912,3 +912,99 @@ func (r *PostgresRepository) DeleteStory(ctx context.Context, storyID, userID uu
 	}
 	return nil
 }
+
+// SubscriptionRepository implements subscription persistence
+type SubscriptionRepository struct {
+	db *pgxpool.Pool
+}
+
+func NewSubscriptionRepository(db *pgxpool.Pool) *SubscriptionRepository {
+	return &SubscriptionRepository{db: db}
+}
+
+func (r *SubscriptionRepository) Create(ctx context.Context, sub *domain.Subscription) error {
+	query := `
+		INSERT INTO subscriptions (id, user_id, plan, status, started_at, expires_at, payment_provider, payment_id, amount_paid)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`
+	_, err := r.db.Exec(ctx, query,
+		sub.ID, sub.UserID, sub.Plan, sub.Status, sub.StartedAt, sub.ExpiresAt,
+		sub.PaymentProvider, sub.PaymentID, sub.AmountPaid,
+	)
+	return err
+}
+
+func (r *SubscriptionRepository) GetActiveByUserID(ctx context.Context, userID uuid.UUID) (*domain.Subscription, error) {
+	query := `
+		SELECT id, user_id, plan, status, started_at, expires_at, payment_provider, payment_id, amount_paid
+		FROM subscriptions
+		WHERE user_id = $1 AND status = 'active' AND expires_at > NOW()
+		ORDER BY expires_at DESC
+		LIMIT 1
+	`
+	sub := &domain.Subscription{}
+	err := r.db.QueryRow(ctx, query, userID).Scan(
+		&sub.ID, &sub.UserID, &sub.Plan, &sub.Status, &sub.StartedAt, &sub.ExpiresAt,
+		&sub.PaymentProvider, &sub.PaymentID, &sub.AmountPaid,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return sub, nil
+}
+
+func (r *SubscriptionRepository) GetByID(ctx context.Context, subID uuid.UUID) (*domain.Subscription, error) {
+	query := `
+		SELECT id, user_id, plan, status, started_at, expires_at, payment_provider, payment_id, amount_paid
+		FROM subscriptions WHERE id = $1
+	`
+	sub := &domain.Subscription{}
+	err := r.db.QueryRow(ctx, query, subID).Scan(
+		&sub.ID, &sub.UserID, &sub.Plan, &sub.Status, &sub.StartedAt, &sub.ExpiresAt,
+		&sub.PaymentProvider, &sub.PaymentID, &sub.AmountPaid,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return sub, nil
+}
+
+func (r *SubscriptionRepository) UpdateStatus(ctx context.Context, subID uuid.UUID, status domain.SubscriptionStatus) error {
+	query := `UPDATE subscriptions SET status = $1, updated_at = NOW() WHERE id = $2`
+	_, err := r.db.Exec(ctx, query, status, subID)
+	return err
+}
+
+func (r *SubscriptionRepository) GetUserHistory(ctx context.Context, userID uuid.UUID) ([]domain.Subscription, error) {
+	query := `
+		SELECT id, user_id, plan, status, started_at, expires_at, payment_provider, payment_id, amount_paid
+		FROM subscriptions WHERE user_id = $1 ORDER BY started_at DESC
+	`
+	rows, err := r.db.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var subs []domain.Subscription
+	for rows.Next() {
+		var sub domain.Subscription
+		if err := rows.Scan(
+			&sub.ID, &sub.UserID, &sub.Plan, &sub.Status, &sub.StartedAt, &sub.ExpiresAt,
+			&sub.PaymentProvider, &sub.PaymentID, &sub.AmountPaid,
+		); err != nil {
+			return nil, err
+		}
+		subs = append(subs, sub)
+	}
+	return subs, nil
+}
+
+func (r *SubscriptionRepository) ExpireOldSubscriptions(ctx context.Context) (int64, error) {
+	query := `UPDATE subscriptions SET status = 'expired' WHERE status = 'active' AND expires_at < NOW()`
+	result, err := r.db.Exec(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

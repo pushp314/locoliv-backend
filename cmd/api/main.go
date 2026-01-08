@@ -145,12 +145,29 @@ func main() {
 	icebreakerHandler := api.NewIcebreakerHandler(icebreakerService, logger)
 	healthHandler := api.NewHealthHandler()
 
+	// Initialize subscription repository and payment handler
+	subRepo := repository.NewSubscriptionRepository(db)
+	paymentHandler := api.NewPaymentHandler(nil, karmaService, subRepo, logger) // razorpay client can be nil if not configured
+
+	// Initialize media handler (R2 storage can be nil if not configured)
+	mediaHandler := api.NewMediaHandler(nil, logger) // R2 storage initialized separately if configured
+
+	// Initialize verification handler
+	verificationRepo := repository.NewVerificationRepository(db)
+	verificationService := domain.NewVerificationService(verificationRepo)
+	verificationHandler := api.NewVerificationHandler(verificationService, logger)
+
+	// Initialize discovery handler
+	discoveryRepo := repository.NewDiscoveryRepository(db)
+	discoveryService := domain.NewDiscoveryService(discoveryRepo)
+	discoveryHandler := api.NewDiscoveryHandler(discoveryService, logger)
+
 	// Initialize router
 	router := api.NewRouter(
 		authHandler, googleOAuthHandler, storyHandler, chatHandler,
-		connectionHandler, notificationHandler, karmaHandler,
+		connectionHandler, notificationHandler, karmaHandler, paymentHandler,
 		leaderboardHandler, neighborhoodHandler, privacyHandler, challengeHandler,
-		eventHandler, icebreakerHandler,
+		eventHandler, icebreakerHandler, mediaHandler, verificationHandler, discoveryHandler,
 		healthHandler, jwtManager, logger,
 	)
 	r := router.Setup()

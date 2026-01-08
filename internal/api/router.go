@@ -22,12 +22,16 @@ type Router struct {
 	connectionHandler   *ConnectionHandler
 	notificationHandler *NotificationHandler
 	karmaHandler        *KarmaHandler
+	paymentHandler      *PaymentHandler
 	leaderboardHandler  *LeaderboardHandler
 	neighborhoodHandler *NeighborhoodHandler
 	privacyHandler      *PrivacyHandler
 	challengeHandler    *ChallengeHandler
 	eventHandler        *EventHandler
 	icebreakerHandler   *IcebreakerHandler
+	mediaHandler        *MediaHandler
+	verificationHandler *VerificationHandler
+	discoveryHandler    *DiscoveryHandler
 	healthHandler       *HealthHandler
 	jwtManager          *auth.JWTManager
 	logger              *zap.Logger
@@ -42,12 +46,16 @@ func NewRouter(
 	connectionHandler *ConnectionHandler,
 	notificationHandler *NotificationHandler,
 	karmaHandler *KarmaHandler,
+	paymentHandler *PaymentHandler,
 	leaderboardHandler *LeaderboardHandler,
 	neighborhoodHandler *NeighborhoodHandler,
 	privacyHandler *PrivacyHandler,
 	challengeHandler *ChallengeHandler,
 	eventHandler *EventHandler,
 	icebreakerHandler *IcebreakerHandler,
+	mediaHandler *MediaHandler,
+	verificationHandler *VerificationHandler,
+	discoveryHandler *DiscoveryHandler,
 	healthHandler *HealthHandler,
 	jwtManager *auth.JWTManager,
 	logger *zap.Logger,
@@ -60,12 +68,16 @@ func NewRouter(
 		connectionHandler:   connectionHandler,
 		notificationHandler: notificationHandler,
 		karmaHandler:        karmaHandler,
+		paymentHandler:      paymentHandler,
 		leaderboardHandler:  leaderboardHandler,
 		neighborhoodHandler: neighborhoodHandler,
 		privacyHandler:      privacyHandler,
 		challengeHandler:    challengeHandler,
 		eventHandler:        eventHandler,
 		icebreakerHandler:   icebreakerHandler,
+		mediaHandler:        mediaHandler,
+		verificationHandler: verificationHandler,
+		discoveryHandler:    discoveryHandler,
 		healthHandler:       healthHandler,
 		jwtManager:          jwtManager,
 		logger:              logger,
@@ -162,9 +174,8 @@ func (rt *Router) Setup() *chi.Mux {
 			r.Route("/premium", func(r chi.Router) {
 				r.Get("/status", rt.karmaHandler.GetPremiumStatus)
 				r.Post("/redeem", rt.karmaHandler.RedeemKarmaForPremium)
-				// Payment routes (will be wired when PaymentHandler is added)
-				// r.Post("/order", rt.paymentHandler.CreateOrder)
-				// r.Post("/verify", rt.paymentHandler.VerifyPayment)
+				r.Post("/order", rt.paymentHandler.CreateOrder)
+				r.Post("/verify", rt.paymentHandler.VerifyPayment)
 			})
 
 			// Story boost
@@ -238,6 +249,24 @@ func (rt *Router) Setup() *chi.Mux {
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.AuthMiddleware(rt.jwtManager))
 		r.Get("/ws/chat", rt.chatHandler.HandleWebSocket)
+	})
+
+	// Media routes (protected)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.AuthMiddleware(rt.jwtManager))
+		RegisterMediaRoutes(r, rt.mediaHandler)
+	})
+
+	// Verification routes (protected)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.AuthMiddleware(rt.jwtManager))
+		RegisterVerificationRoutes(r, rt.verificationHandler)
+	})
+
+	// Discovery routes (protected)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.AuthMiddleware(rt.jwtManager))
+		RegisterDiscoveryRoutes(r, rt.discoveryHandler)
 	})
 
 	return r

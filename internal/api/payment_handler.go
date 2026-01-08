@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -13,16 +14,24 @@ import (
 	"go.uber.org/zap"
 )
 
+// SubscriptionRepo interface for saving subscriptions
+type SubscriptionRepo interface {
+	Create(ctx context.Context, sub *domain.Subscription) error
+	GetActiveByUserID(ctx context.Context, userID uuid.UUID) (*domain.Subscription, error)
+}
+
 type PaymentHandler struct {
 	razorpay     *payment.RazorpayClient
 	karmaService *domain.KarmaService
+	subRepo      SubscriptionRepo
 	logger       *zap.Logger
 }
 
-func NewPaymentHandler(razorpay *payment.RazorpayClient, karmaService *domain.KarmaService, logger *zap.Logger) *PaymentHandler {
+func NewPaymentHandler(razorpay *payment.RazorpayClient, karmaService *domain.KarmaService, subRepo SubscriptionRepo, logger *zap.Logger) *PaymentHandler {
 	return &PaymentHandler{
 		razorpay:     razorpay,
 		karmaService: karmaService,
+		subRepo:      subRepo,
 		logger:       logger,
 	}
 }
@@ -133,19 +142,27 @@ func (h *PaymentHandler) VerifyPayment(w http.ResponseWriter, r *http.Request) {
 		AmountPaid:      &amount,
 	}
 
-	// TODO: Save subscription to repository
-	_ = sub // Silence linter until repo access is implemented
+	// Save subscription to database
+	if h.subRepo != nil {
+		if err := h.subRepo.Create(r.Context(), sub); err != nil {
+			h.logger.Error("Failed to save subscription", zap.Error(err))
+			response.InternalError(w, "failed to activate subscription")
+			return
+		}
+	}
 
 	h.logger.Info("Subscription created",
 		zap.String("user_id", userID.String()),
 		zap.String("plan", string(sub.Plan)),
+		zap.String("subscription_id", sub.ID.String()),
 		zap.String("payment_id", req.RazorpayPaymentID),
 	)
 
 	response.OK(w, map[string]interface{}{
-		"success":    true,
-		"message":    "Premium activated successfully!",
-		"plan":       sub.Plan,
-		"expires_at": sub.ExpiresAt,
+		"success":         true,
+		"message":         "Premium activated successfully!",
+		"subscription_id": sub.ID,
+		"plan":            sub.Plan,
+		"expires_at":      sub.ExpiresAt,
 	})
 }
