@@ -1,8 +1,21 @@
 -- Phase 14: Leaderboard, Ask Neighborhood & Privacy
 
--- Add city/location to user profiles for leaderboard
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS city VARCHAR(100);
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS state VARCHAR(100);
+-- Create profiles table if not exists
+CREATE TABLE IF NOT EXISTS profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    bio TEXT,
+    avatar_url TEXT,
+    location_lat DECIMAL(10,8),
+    location_lng DECIMAL(11,8),
+    city VARCHAR(100),
+    state VARCHAR(100),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create index for profiles user_id if not exists
+CREATE INDEX IF NOT EXISTS idx_profiles_user ON profiles(user_id);
 
 -- Create index for leaderboard queries
 CREATE INDEX IF NOT EXISTS idx_profiles_city ON profiles(city);

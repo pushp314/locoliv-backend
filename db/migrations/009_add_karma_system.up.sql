@@ -77,7 +77,7 @@ CREATE INDEX idx_user_badges_user ON user_badges(user_id);
 CREATE INDEX idx_subscriptions_user ON subscriptions(user_id);
 CREATE INDEX idx_subscriptions_status ON subscriptions(status, expires_at);
 CREATE INDEX idx_story_boosts_story ON story_boosts(story_id);
-CREATE INDEX idx_story_boosts_active ON story_boosts(expires_at) WHERE expires_at > NOW();
+CREATE INDEX idx_story_boosts_active ON story_boosts(expires_at);
 
 -- Seed default badges
 INSERT INTO badges (code, name_sanskrit, name_hindi, description, min_karma, sort_order) VALUES

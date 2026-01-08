@@ -30,9 +30,9 @@ CREATE INDEX IF NOT EXISTS idx_verification_requests_user ON verification_reques
 -- Database Query Optimization: Add missing indexes
 
 -- Story feed optimization
-CREATE INDEX IF NOT EXISTS idx_stories_feed ON stories(created_at DESC, user_id) WHERE expires_at > NOW();
-CREATE INDEX IF NOT EXISTS idx_stories_location ON stories(location_lat, location_lng) WHERE expires_at > NOW();
-CREATE INDEX IF NOT EXISTS idx_stories_expires ON stories(expires_at) WHERE expires_at > NOW();
+CREATE INDEX IF NOT EXISTS idx_stories_feed ON stories(created_at DESC, user_id);
+CREATE INDEX IF NOT EXISTS idx_stories_location ON stories(location_lat, location_lng);
+CREATE INDEX IF NOT EXISTS idx_stories_expires ON stories(expires_at);
 
 -- Chat optimization
 CREATE INDEX IF NOT EXISTS idx_messages_chat_time ON messages(chat_id, created_at DESC);
@@ -40,8 +40,8 @@ CREATE INDEX IF NOT EXISTS idx_chats_user_updated ON chats(updated_at DESC);
 
 -- Connection optimization
 CREATE INDEX IF NOT EXISTS idx_connections_user_status ON connections(requester_id, status);
-CREATE INDEX IF NOT EXISTS idx_connections_recipient_status ON connections(recipient_id, status);
-CREATE INDEX IF NOT EXISTS idx_connections_accepted ON connections(requester_id, recipient_id) WHERE status = 'accepted';
+CREATE INDEX IF NOT EXISTS idx_connections_receiver_status ON connections(receiver_id, status);
+CREATE INDEX IF NOT EXISTS idx_connections_accepted ON connections(requester_id, receiver_id) WHERE status = 'accepted';
 
 -- Karma optimization
 CREATE INDEX IF NOT EXISTS idx_karma_user_created ON karma_transactions(user_id, created_at DESC);
@@ -52,7 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_profiles_city_karma ON profiles(city) INCLUDE (us
 CREATE INDEX IF NOT EXISTS idx_user_karma_leaderboard ON user_karma(total_karma DESC) INCLUDE (user_id, current_tier);
 
 -- Events optimization
-CREATE INDEX IF NOT EXISTS idx_events_city_date ON local_events(city, event_date) WHERE event_date >= NOW();
+CREATE INDEX IF NOT EXISTS idx_events_city_date ON local_events(city, event_date);
 CREATE INDEX IF NOT EXISTS idx_events_creator ON local_events(creator_id, event_date DESC);
 
 -- Neighborhood posts optimization
@@ -70,4 +70,4 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id,
 CREATE INDEX IF NOT EXISTS idx_subscriptions_active ON subscriptions(user_id, status, expires_at) WHERE status = 'active';
 
 -- Session optimization
-CREATE INDEX IF NOT EXISTS idx_sessions_user_active ON sessions(user_id) WHERE expires_at > NOW();
+CREATE INDEX IF NOT EXISTS idx_sessions_user_active ON sessions(user_id, expires_at);

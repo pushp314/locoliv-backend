@@ -58,7 +58,7 @@ CREATE TABLE user_interests (
 
 -- Indexes
 CREATE INDEX idx_local_events_city ON local_events(city, event_date);
-CREATE INDEX idx_local_events_date ON local_events(event_date) WHERE event_date > NOW();
+CREATE INDEX idx_local_events_date ON local_events(event_date);
 CREATE INDEX idx_event_rsvps_event ON event_rsvps(event_id);
 CREATE INDEX idx_event_rsvps_user ON event_rsvps(user_id);
 CREATE INDEX idx_daily_matches_user ON daily_matches(user_id, match_date);
